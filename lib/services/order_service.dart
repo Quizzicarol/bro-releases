@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
 
 class OrderService {
-  static const String baseUrl = 'http://10.0.2.2:3002';
+  static String get baseUrl => AppConfig.defaultBackendUrl;
   static const Duration orderTimeout = Duration(hours: 24);
 
   /// Criar ordem de pagamento
