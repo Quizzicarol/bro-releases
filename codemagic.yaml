@@ -1,231 +1,148 @@
-# Disable default workflow - use only custom workflows below
-definitions:
-  instance_types:
-    mac_mini: &mac_mini
-      instance_type: mac_mini_m2
+# Codemagic CI/CD Configuration for Bro App
+# Docs: https://docs.codemagic.io/yaml-quick-start/building-a-flutter-app/
 
 workflows:
-  ios-workflow:
-    name: iOS Build
-    
-    instance_type: mac_mini_m2
-    
+  # ============================================
+  # ANDROID - Google Play Store
+  # ============================================
+  android-release:
+    name: Android Release
     max_build_duration: 60
+    instance_type: mac_mini_m1
     
     environment:
-      flutter: stable
-      xcode: latest
-      cocoapods: default
-      
-      vars:
-        BUNDLE_ID: "com.bitcoincoders.pagaconta"
-        XCODE_PROJECT: "Runner.xcodeproj"
-        XCODE_SCHEME: "Runner"
-        BREEZ_API_KEY: "MIIBjDCCAT6gAwIBAgIHPom4vIYNvzAFBgMrZXAwMBSBAQDCQCAQQwjHWoAMfQm7wPFDCBwjsBAmMCsGA1UEAwwkc2RrLW5vZGVsZXNzLWFwaS1kNmY4M2Y5Zi00NWI3LTRkYjMwHhcNMjUwMjExMTQ1MTMxWhcNMjUwMzEzMTQ1MTMxWjArMSkwJwYDVQQDDCBzZGstbm9kZWxlc3MtYXBpLWQ2ZjgzZjlmLTQ1YjcwKjAFBgMrZXADIQD2xW0Fn9N5zOHmBGrBHLl3vZhJEJxJQZDdY3Xc2xYabqNgMF4wHQYDVR0OBBYEFOJLvHiZBjzF3KnAcXBRzWJLU4xwMB8GA1UdIwQYMBaAFGlBKZRzLzAJ3Tl9uUlBKZRzU4xwMAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/BAQDAgeAMAUGAytlcANBAE5WH+hSQjJPqYr3jBhtJNNxZl2V0cK9pWzJQq0AJFwzrLJKZhC8xY3F1cW7vYTJQqwAZhC8xF1cW7vYTJQq"
-        
       groups:
-        - apple_credentials
-        
+        - google_play_credentials
+        - keystore_credentials
+      flutter: stable
+      java: 17
+      
     triggering:
       events:
         - push
       branch_patterns:
-        - pattern: ios-build
+        - pattern: 'release/*'
+          include: true
+        - pattern: 'main'
+          include: true
+      
+    scripts:
+      - name: Set up keystore
+        script: |
+          echo $CM_KEYSTORE | base64 --decode > $CM_BUILD_DIR/keystore.jks
+          cat >> "$CM_BUILD_DIR/android/key.properties" <<EOF
+          storePassword=$CM_KEYSTORE_PASSWORD
+          keyPassword=$CM_KEY_PASSWORD
+          keyAlias=$CM_KEY_ALIAS
+          storeFile=$CM_BUILD_DIR/keystore.jks
+          EOF
+          
+      - name: Get Flutter packages
+        script: flutter pub get
+        
+      - name: Build APK (debug for testing)
+        script: flutter build apk --debug
+        
+      - name: Build AAB (release for Play Store)
+        script: flutter build appbundle --release
+        
+    artifacts:
+      - build/**/outputs/**/*.apk
+      - build/**/outputs/**/*.aab
+      - build/**/outputs/**/mapping.txt
+      
+    publishing:
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal
+        submit_as_draft: true
+
+  # ============================================
+  # iOS - TestFlight / App Store
+  # ============================================
+  ios-release:
+    name: iOS Release
+    max_build_duration: 90
+    instance_type: mac_mini_m1
+    
+    integrations:
+      app_store_connect: Bro App
+      
+    environment:
+      groups:
+        - app_store_credentials
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: app.bro.mobile
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: 'release/*'
+          include: true
+        - pattern: 'main'
           include: true
           
     scripts:
-      - name: Setup Flutter
-        script: |
-          flutter --version
-          flutter doctor -v
-          
-      - name: Install dependencies
-        script: |
-          flutter pub get
-          
-      - name: Install iOS Pods
+      - name: Set up code signing
+        script: xcode-project use-profiles
+        
+      - name: Get Flutter packages
+        script: flutter pub get
+        
+      - name: Install CocoaPods
         script: |
           cd ios
-          pod install --repo-update
-          cd ..
-      
-      - name: Set up code signing
-        script: |
-          xcode-project use-profiles
+          pod install
           
-      - name: Build iOS for development/preview
-        script: |
-          flutter build ipa --release \
-            --export-options-plist=ios/ExportOptions.plist
-            
+      - name: Build iOS
+        script: flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
+        
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
       
     publishing:
-      email:
-        recipients:
-          - carol.odo@hotmail.com
-        notify:
-          success: true
-          failure: true
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: false
 
-  default-workflow:
-    name: iOS Simulator Preview
-    
-    instance_type: mac_mini_m2
-    
-    max_build_duration: 30
+  # ============================================
+  # DEBUG BUILD (para testes)
+  # ============================================
+  debug-build:
+    name: Debug Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
     
     environment:
       flutter: stable
       xcode: latest
-      cocoapods: default
+      java: 17
       
     triggering:
       events:
         - push
       branch_patterns:
-        - pattern: main
+        - pattern: 'develop'
           include: true
-        
-    scripts:
-      - name: Setup Flutter
-        script: |
-          flutter --version
-          flutter doctor -v
-          
-      - name: Install dependencies
-        script: |
-          flutter pub get
-          
-      - name: Install iOS Pods
-        script: |
-          cd ios
-          pod install --repo-update
-          cd ..
-          
-      - name: Build iOS Simulator App
-        script: |
-          flutter build ios --simulator --debug
-          
-    artifacts:
-      - build/ios/iphonesimulator/*.app
-      
-    publishing:
-      email:
-        recipients:
-          - carol.odo@hotmail.com
-        notify:
-          success: true
-          failure: true
-
-  web-workflow:
-    name: Web Build (Preview no Navegador)
-    
-    instance_type: linux_x2
-    
-    max_build_duration: 30
-    
-    environment:
-      flutter: stable
-      
-      vars:
-        GITHUB_TOKEN: Encrypted(...) # Configurar no Codemagic
-        
-    triggering:
-      events:
-        - push
-      branch_patterns:
-        - pattern: web-build
+        - pattern: 'feature/*'
           include: true
-        
+          
     scripts:
-      - name: Setup Flutter
-        script: |
-          flutter --version
-          flutter config --enable-web
-          
-      - name: Install dependencies
-        script: |
-          flutter pub get
-          
-      - name: Build Web
-        script: |
-          flutter build web --release --web-renderer canvaskit
-          
-      - name: Deploy to GitHub Pages
-        script: |
-          cd build/web
-          git init
-          git config user.name "Codemagic CI"
-          git config user.email "ci@codemagic.io"
-          git add .
-          git commit -m "Deploy web build"
-          git push --force https://Quizzicarol:$GITHUB_TOKEN@github.com/Quizzicarol/paga-conta-mobile.git HEAD:gh-pages
-          
-    artifacts:
-      - build/web/**
-      
-    publishing:
-      email:
-        recipients:
-          - carol.odo@hotmail.com
-        notify:
-          success: true
-          failure: true
-      
-      scripts:
-        - name: Show preview URL
-          script: |
-            echo "Preview disponível em: https://quizzicarol.github.io/paga-conta-mobile/"
-
-  android-workflow:
-    name: Android Build
-    
-    instance_type: linux_x2
-    
-    max_build_duration: 60
-    
-    environment:
-      flutter: stable
-      
-      vars:
-        PACKAGE_NAME: "com.bitcoincoders.pagaconta"
+      - name: Get Flutter packages
+        script: flutter pub get
         
-    triggering:
-      events:
-        - push
-      branch_patterns:
-        - pattern: develop
-          include: true
+      - name: Analyze code
+        script: flutter analyze --no-fatal-infos
         
-    scripts:
-      - name: Setup Flutter
-        script: |
-          flutter --version
-          flutter doctor -v
-          
-      - name: Install dependencies
-        script: |
-          flutter pub get
-          
-      - name: Build APK
-        script: |
-          flutter build apk --release
-          
-      - name: Build AAB
-        script: |
-          flutter build appbundle --release
-          
+      - name: Build Android Debug
+        script: flutter build apk --debug
+        
     artifacts:
-      - build/app/outputs/flutter-apk/app-release.apk
-      - build/app/outputs/bundle/release/app-release.aab
-      
-    publishing:
-      email:
-        recipients:
-          - carol.odo@hotmail.com
-        notify:
-          success: true
-          failure: true
+      - build/**/outputs/**/*.apk

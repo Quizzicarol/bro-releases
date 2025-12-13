@@ -1,37 +1,109 @@
-﻿class AppConfig {
-  // Backend API
-  static const String defaultBackendUrl = 'http://10.0.2.2:3002'; // 10.0.2.2 points to host machine's localhost in Android emulator
+﻿/// Configuracao centralizada do Bro App
+/// 
+/// CHECKLIST PARA PRODUCAO:
+/// [ ] testMode = false
+/// [ ] providerTestMode = false
+/// [ ] defaultBackendUrl = URL do backend de producao
+/// [ ] Verificar breezApiKey esta correto
+/// 
+class AppConfig {
+  // ============================================
+  // MODO DE DESENVOLVIMENTO (ALTERAR PARA DEPLOY)
+  // ============================================
   
-  // Test Mode (desabilita chamadas de backend e usa dados mockados)
-  static const bool testMode = true; // Mude para false quando tiver backend rodando
+  /// Modo de teste - usa dados mockados, sem backend real
+  /// PRODUCAO: Mude para FALSE
+  static const bool testMode = true;
   
-  // Breez SDK API Key (certificado nodeless)
+  /// Permite provedores sem garantia depositada
+  /// PRODUCAO: Mude para FALSE
+  static const bool providerTestMode = true;
+
+  // ============================================
+  // BACKEND API
+  // ============================================
+  
+  /// URL do backend para emulador Android
+  static const String _emulatorUrl = 'http://10.0.2.2:3002';
+  
+  /// URL do backend para dispositivo fisico (mesmo WiFi)
+  static const String _localDeviceUrl = 'http://192.168.0.100:3002';
+  
+  /// URL do backend de producao
+  static const String _productionUrl = 'https://api.bro.app';
+  
+  /// URL ativa - mude conforme ambiente
+  static const String defaultBackendUrl = _emulatorUrl;
+
+  // ============================================
+  // BREEZ SDK (Lightning Network)
+  // ============================================
+  
+  /// API Key do Breez SDK (certificado nodeless)
+  /// Este e um certificado publico, NAO e uma chave secreta
   static const String breezApiKey = '''MIIBjDCCAT6gAwIBAgIHPom4vIYNvzAFBgMrZXAwEDEOMAwGA1UEAxMFQnJlZXowHhcNMjUxMDEyMTY0NTA4WhcNMzUxMDEwMTY0NTA4WjBAMSgwJgYDVQQKEx9BcmVhIEJpdGNvaW4gYW5kIEJpdGNvaW4gQ29kZXJzMRQwEgYDVQQDEwtDYXJvbCBTb3V6YTAqMAUGAytlcAMhANCD9cvfIDwcoiDKKYdT9BunHLS2/OuKzV8NS0SzqV13o4GGMIGDMA4GA1UdDwEB/wQEAwIFoDAMBgNVHRMBAf8EAjAAMB0GA1UdDgQWBBTaOaPuXmtLDTJVv++VYBiQr9gHCTAfBgNVHSMEGDAWgBTeqtaSVvON53SSFvxMtiCyayiYazAjBgNVHREEHDAagRhjYXJvbEBhcmVhYml0Y29pbi5jb20uYnIwBQYDK2VwA0EAXZHGqrPXd8IVwVt7VNj3cKiYsdTo2Lz2B8HnR2Knd//bfoyO6MmBZHD0nszCIBLZTaiUiqgBN18YHfJnymK8DA==''';
+
+  // ============================================
+  // APP INFO
+  // ============================================
   
-  // App Info
   static const String appName = 'Bro';
   static const String appVersion = '1.0.0';
+  static const int buildNumber = 1;
   
-  // Network - MAINNET ATIVO (Bitcoin REAL)
-  static const bool useMainnet = true; // PRODUÃ‡ÃƒO - Bitcoin de verdade
+  /// Bundle ID para iOS
+  static const String iosBundleId = 'app.bro.mobile';
   
-  // Features
+  /// Package name para Android
+  static const String androidPackage = 'app.bro.mobile';
+
+  // ============================================
+  // NETWORK (Bitcoin)
+  // ============================================
+  
+  /// true = MAINNET (Bitcoin real), false = TESTNET
+  static const bool useMainnet = true;
+
+  // ============================================
+  // FEATURES
+  // ============================================
+  
   static const bool enableProviderMode = true;
   static const bool enableNotifications = true;
+  static const bool enableClassifieds = true;
+  static const bool enableChat = true;
+
+  // ============================================
+  // TAXAS E LIMITES
+  // ============================================
   
-  // Provider Test Mode (permite testar sem garantias)
-  static const bool providerTestMode = true; // Mude para false em produÃ§Ã£o
+  /// Taxa do provedor (5%)
+  static const double providerFeePercent = 0.05;
   
-  // Fees
-  static const double providerFeePercent = 0.05; // 5%
-  static const double platformFeePercent = 0.02; // 2%
+  /// Taxa da plataforma (2%)
+  static const double platformFeePercent = 0.02;
   
-  // Limits
-  static const int minPaymentSats = 1000; // 1k sats
-  static const int maxPaymentSats = 1000000; // 1M sats
+  /// Limite minimo em sats
+  static const int minPaymentSats = 1000;
   
-  // Timeouts
+  /// Limite maximo em sats (1M = ~R\ em dez/2025)
+  static const int maxPaymentSats = 1000000;
+
+  // ============================================
+  // TIMEOUTS
+  // ============================================
+  
   static const int apiTimeoutSeconds = 30;
   static const int invoiceExpirySeconds = 3600; // 1 hora
+  static const int orderExpiryHours = 24;
+  
+  // ============================================
+  // HELPERS
+  // ============================================
+  
+  /// Retorna true se esta em modo de desenvolvimento
+  static bool get isDevelopment => testMode || providerTestMode;
+  
+  /// Retorna true se esta pronto para producao
+  static bool get isProduction => !testMode && !providerTestMode;
 }
-

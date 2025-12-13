@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import '../config.dart';
 
 class EscrowService {
-  static const String baseUrl = 'http://10.0.2.2:3002';
+  static String get baseUrl => AppConfig.defaultBackendUrl;
   static const double providerFeePercent = 3.0;
 
   Future<Map<String, dynamic>> depositCollateral({required String tierId, required int amountSats}) async {
