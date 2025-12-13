@@ -25,6 +25,9 @@ import 'providers/platform_balance_provider.dart';
 import 'services/storage_service.dart';
 import 'services/notification_service.dart';
 import 'services/api_service.dart';
+import 'services/cache_service.dart';
+import 'services/haptic_service.dart';
+import 'providers/theme_provider.dart';
 import 'theme/bro_theme.dart';
 
 void main() async {
@@ -32,6 +35,9 @@ void main() async {
 
   // Inicializar notificacoes
   await NotificationService().initialize();
+
+  // Inicializar cache
+  await CacheService().init();
 
   // Verificar se ja esta logado
   final storage = StorageService();
@@ -89,6 +95,7 @@ class BroApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         Provider(create: (_) => ApiService()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => BreezProvider()),
         ChangeNotifierProvider(
           create: (_) {
@@ -121,12 +128,15 @@ class BroApp extends StatelessWidget {
           // Verificar reconciliacao na inicializacao (quando SDK estiver pronto)
           _scheduleReconciliationOnStartup(breezProvider, orderProvider);
 
-          return MaterialApp(
-            title: 'Bro',
-            debugShowCheckedModeBanner: false,
-            theme: BroTheme.darkTheme,
-            themeMode: ThemeMode.dark,
-            home: isLoggedIn ? const HomeScreen() : const LoginScreen(),
+          return Consumer<ThemeProvider>(
+            builder: (context, themeProvider, _) {
+              return MaterialApp(
+                title: 'Bro',
+                debugShowCheckedModeBanner: false,
+                theme: BroThemes.lightTheme,
+                darkTheme: BroThemes.darkTheme,
+                themeMode: themeProvider.themeMode,
+                home: isLoggedIn ? const HomeScreen() : const LoginScreen(),
             onGenerateRoute: (settings) {
               // Rotas com parametros
               if (settings.name == '/order-status') {
@@ -185,6 +195,8 @@ class BroApp extends StatelessWidget {
               '/provider-order-detail': (context) => const ProviderOrderDetailScreen(orderId: 'temp', providerId: 'temp'),
               '/provider-balance': (context) => const ProviderBalanceScreen(),
               '/platform-balance': (context) => const PlatformBalanceScreen(),
+            },
+          );
             },
           );
         },
