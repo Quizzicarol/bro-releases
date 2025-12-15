@@ -875,15 +875,17 @@ class _PaymentScreenState extends State<PaymentScreen> {
             ],
           ),
           const SizedBox(height: 16),
-          _buildInstructionStep('1', 'Cole o código PIX ou boleto acima'),
+          _buildInstructionStep('1', 'Cole acima o código PIX ou boleto'),
           const SizedBox(height: 12),
           _buildInstructionStep('2', 'Confira o valor e as taxas'),
           const SizedBox(height: 12),
-          _buildInstructionStep('3', 'Pague em Bitcoin via Lightning'),
+          _buildInstructionStep('3', 'Pague em Bitcoin on-chain ou Lightning'),
           const SizedBox(height: 12),
-          _buildInstructionStep('4', 'Um Bro aceita sua ordem e paga a conta'),
+          _buildInstructionStep('4', 'Aguarde um Bro aceitar sua ordem e pagar sua conta'),
           const SizedBox(height: 12),
-          _buildInstructionStep('5', 'Pronto! Conta paga com Bitcoin 🎉'),
+          _buildInstructionStep('5', 'Confirme que o pagamento foi feito e libere o valor para o Bro'),
+          const SizedBox(height: 12),
+          _buildInstructionStep('6', 'Pronto, conta paga de Bro para Bro! 🤝'),
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(12),
@@ -891,17 +893,31 @@ class _PaymentScreenState extends State<PaymentScreen> {
               color: const Color(0x1A3DE98C),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Row(
+            child: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.security, color: Color(0xFF3DE98C), size: 20),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Seu pagamento fica em custódia até o Bro confirmar que pagou sua conta.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF3DE98C),
+                Row(
+                  children: [
+                    Icon(Icons.security, color: Color(0xFF3DE98C), size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Seu pagamento fica em um endereço aguardando até que um Bro confirme que pagou sua conta.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF3DE98C),
+                        ),
+                      ),
                     ),
+                  ],
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Obs: Se você não confirmar em 24h o pagamento da conta, sua garantia depositada em bitcoin é liberada automaticamente para o Bro que enviou o comprovante.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Color(0xB3FFFFFF),
+                    fontStyle: FontStyle.italic,
                   ),
                 ),
               ],

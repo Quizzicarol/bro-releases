@@ -348,9 +348,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildBitcoinPriceButton() {
+    // Só mostrar preço se tiver valor real da API
     final btcPriceFormatted = _btcPrice > 0 
         ? _currencyFormat.format(_btcPrice) 
-        : 'R\$ --';
+        : 'Carregando...';
 
     return Container(
       height: 90,
