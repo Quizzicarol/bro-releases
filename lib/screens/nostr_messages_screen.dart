@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/storage_service.dart';
-import '../services/nostr_service.dart';
 
 class NostrMessagesScreen extends StatefulWidget {
   const NostrMessagesScreen({Key? key}) : super(key: key);
@@ -12,7 +11,6 @@ class NostrMessagesScreen extends StatefulWidget {
 
 class _NostrMessagesScreenState extends State<NostrMessagesScreen> {
   final _storage = StorageService();
-  final _nostrService = NostrService();
   final _messageController = TextEditingController();
   final _recipientController = TextEditingController();
   

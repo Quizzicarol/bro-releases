@@ -1,0 +1,982 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import '../providers/breez_provider_export.dart';
+
+/// Tela de Carteira Lightning - Apenas BOLT11 (invoice)
+/// Funções: Ver saldo, Enviar pagamento, Receber (gerar invoice)
+class WalletScreen extends StatefulWidget {
+  const WalletScreen({Key? key}) : super(key: key);
+
+  @override
+  State<WalletScreen> createState() => _WalletScreenState();
+}
+
+class _WalletScreenState extends State<WalletScreen> {
+  Map<String, dynamic>? _balance;
+  List<Map<String, dynamic>> _payments = [];
+  bool _isLoading = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadWalletInfo();
+  }
+
+  Future<void> _loadWalletInfo() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final breezProvider = context.read<BreezProvider>();
+      
+      if (!breezProvider.isInitialized) {
+        debugPrint('🔄 Inicializando Breez SDK...');
+        final success = await breezProvider.initialize();
+        if (!success) {
+          throw Exception('Falha ao inicializar SDK');
+        }
+      }
+
+      final balance = await breezProvider.getBalance();
+      final payments = await breezProvider.listPayments();
+      
+      debugPrint('💰 Saldo: ${balance?['balance']} sats');
+      debugPrint('📜 Pagamentos: ${payments.length}');
+
+      if (mounted) {
+        setState(() {
+          _balance = balance;
+          _payments = payments;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Erro ao carregar carteira: $e');
+      if (mounted) {
+        setState(() => _error = e.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0A),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: const Row(
+          children: [
+            Icon(Icons.account_balance_wallet, color: Color(0xFFFF9800)),
+            SizedBox(width: 8),
+            Text('Minha Carteira', style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _isLoading ? null : _loadWalletInfo,
+          ),
+        ],
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: Color(0xFFFF9800)),
+            SizedBox(height: 16),
+            Text('Carregando carteira...', style: TextStyle(color: Colors.white70)),
+          ],
+        ),
+      );
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, color: Colors.red, size: 64),
+              const SizedBox(height: 16),
+              Text(
+                'Erro ao carregar carteira',
+                style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                style: const TextStyle(color: Colors.white70, fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: _loadWalletInfo,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Tentar novamente'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFF9800),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadWalletInfo,
+      color: const Color(0xFFFF9800),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildBalanceCard(),
+            const SizedBox(height: 20),
+            _buildActionButtons(),
+            const SizedBox(height: 24),
+            _buildPaymentsHistory(),
+            const SizedBox(height: 40), // Extra padding at bottom
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBalanceCard() {
+    final balanceSats = int.tryParse(_balance?['balance']?.toString() ?? '0') ?? 0;
+    final balanceBtc = balanceSats / 100000000;
+    final hasError = _balance?['error'] != null;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: hasError 
+              ? [Colors.grey.shade800, Colors.grey.shade700]
+              : [const Color(0xFFFF9800), const Color(0xFFFFB74D)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: (hasError ? Colors.grey : const Color(0xFFFF9800)).withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.flash_on, color: Colors.white, size: 24),
+              SizedBox(width: 8),
+              Text(
+                'Saldo Lightning',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (hasError)
+            Text(
+              'Erro: ${_balance?['error']}',
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
+            )
+          else ...[
+            Text(
+              _formatSats(balanceSats),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '≈ ${balanceBtc.toStringAsFixed(8)} BTC',
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _formatSats(int sats) {
+    return '${sats.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')} sats';
+  }
+
+  Widget _buildActionButtons() {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildActionButton(
+            icon: Icons.arrow_upward,
+            label: 'Enviar',
+            color: const Color(0xFFE53935),
+            onTap: _showSendDialog,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _buildActionButton(
+            icon: Icons.arrow_downward,
+            label: 'Receber',
+            color: const Color(0xFF4CAF50),
+            onTap: _showReceiveDialog,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: Icon(icon, color: Colors.white, size: 24),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==================== ENVIAR ====================
+  void _showSendDialog() {
+    final invoiceController = TextEditingController();
+    bool isSending = false;
+    
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1A1A1A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+              left: 20,
+              right: 20,
+              top: 20,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE53935).withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Icon(Icons.arrow_upward, color: Color(0xFFE53935)),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        'Enviar Bitcoin',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white54),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                
+                // Campo de invoice
+                TextField(
+                  controller: invoiceController,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  maxLines: 3,
+                  enabled: !isSending,
+                  decoration: InputDecoration(
+                    labelText: 'Invoice Lightning (BOLT11)',
+                    labelStyle: TextStyle(color: Colors.white.withOpacity(0.6)),
+                    hintText: 'lnbc...',
+                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFF333333)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFF333333)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFE53935)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                
+                // Botão Colar
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: isSending ? null : () async {
+                      final data = await Clipboard.getData('text/plain');
+                      if (data?.text != null) {
+                        invoiceController.text = data!.text!.trim();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('✅ Colado!'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    icon: const Icon(Icons.paste),
+                    label: const Text('Colar da área de transferência'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFFF9800),
+                      side: const BorderSide(color: Color(0xFFFF9800)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                
+                // Botão Enviar
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: isSending ? null : () async {
+                      final invoice = invoiceController.text.trim();
+                      if (invoice.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Cole uma invoice válida'),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
+                      
+                      if (!invoice.toLowerCase().startsWith('lnbc') && 
+                          !invoice.toLowerCase().startsWith('lntb')) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Invoice inválida. Deve começar com lnbc ou lntb'),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
+                      
+                      setModalState(() => isSending = true);
+                      debugPrint('💸 Enviando pagamento...');
+                      
+                      try {
+                        final breezProvider = context.read<BreezProvider>();
+                        final result = await breezProvider.payInvoice(invoice);
+                        
+                        debugPrint('📦 Resultado pagamento: $result');
+                        
+                        if (result != null && result['success'] == true) {
+                          if (context.mounted) {
+                            Navigator.pop(context);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('✅ Pagamento enviado com sucesso!'),
+                                backgroundColor: Color(0xFF4CAF50),
+                              ),
+                            );
+                          }
+                          _loadWalletInfo(); // Atualizar saldo
+                        } else {
+                          // Erro específico de saldo insuficiente
+                          final errorType = result?['errorType'];
+                          final errorMsg = result?['error'] ?? 'Falha ao enviar pagamento';
+                          
+                          setModalState(() => isSending = false);
+                          
+                          if (context.mounted) {
+                            if (errorType == 'INSUFFICIENT_FUNDS') {
+                              // Mostrar dialog específico para saldo insuficiente
+                              showDialog(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  backgroundColor: const Color(0xFF1A1A1A),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  title: const Row(
+                                    children: [
+                                      Icon(Icons.account_balance_wallet, color: Colors.orange, size: 28),
+                                      SizedBox(width: 12),
+                                      Text('Saldo Insuficiente', style: TextStyle(color: Colors.white)),
+                                    ],
+                                  ),
+                                  content: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        errorMsg,
+                                        style: const TextStyle(color: Colors.white70),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      Container(
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: Colors.orange.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            const Icon(Icons.info_outline, color: Colors.orange, size: 20),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                'Deposite mais sats na sua carteira para fazer este pagamento.',
+                                                style: TextStyle(color: Colors.orange.shade200, fontSize: 13),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx),
+                                      child: const Text('OK', style: TextStyle(color: Colors.orange)),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(errorMsg),
+                                  backgroundColor: Colors.red,
+                                  duration: const Duration(seconds: 4),
+                                ),
+                              );
+                            }
+                          }
+                        }
+                      } catch (e) {
+                        debugPrint('❌ Erro ao enviar: $e');
+                        setModalState(() => isSending = false);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Erro: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    icon: isSending
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.send),
+                    label: Text(isSending ? 'Enviando...' : 'Enviar Pagamento'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFE53935),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ==================== RECEBER ====================
+  void _showReceiveDialog() {
+    final amountController = TextEditingController(text: '1000');
+    String? generatedInvoice;
+    bool isGenerating = false;
+    String? errorMsg;
+    
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1A1A1A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+              left: 20,
+              right: 20,
+              top: 20,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF4CAF50).withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Icon(Icons.arrow_downward, color: Color(0xFF4CAF50)),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        'Receber Bitcoin',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white54),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                
+                if (generatedInvoice == null) ...[
+                  // Campo de valor
+                  TextField(
+                    controller: amountController,
+                    keyboardType: TextInputType.number,
+                    enabled: !isGenerating,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: 'Quantidade (sats)',
+                      labelStyle: TextStyle(color: Colors.white.withOpacity(0.6)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFF333333)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFF333333)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFF4CAF50)),
+                      ),
+                      suffixText: 'sats',
+                      suffixStyle: const TextStyle(color: Colors.white54),
+                    ),
+                  ),
+                  
+                  if (errorMsg != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.red.withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              errorMsg!,
+                              style: const TextStyle(color: Colors.red, fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  
+                  const SizedBox(height: 16),
+                  
+                  // Botão Gerar Invoice
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: isGenerating ? null : () async {
+                        final amountText = amountController.text.trim();
+                        final amount = int.tryParse(amountText);
+                        
+                        if (amount == null || amount <= 0) {
+                          setModalState(() => errorMsg = 'Digite um valor válido');
+                          return;
+                        }
+                        
+                        if (amount < 100) {
+                          setModalState(() => errorMsg = 'Mínimo: 100 sats');
+                          return;
+                        }
+                        
+                        setModalState(() {
+                          isGenerating = true;
+                          errorMsg = null;
+                        });
+                        
+                        debugPrint('🎯 Gerando invoice de $amount sats...');
+                        
+                        try {
+                          final breezProvider = context.read<BreezProvider>();
+                          final result = await breezProvider.createInvoice(
+                            amountSats: amount,
+                            description: 'Receber $amount sats - Bro App',
+                          );
+                          
+                          debugPrint('📦 Resultado createInvoice: $result');
+                          
+                          if (result != null && result['bolt11'] != null) {
+                            final bolt11 = result['bolt11'] as String;
+                            debugPrint('✅ Invoice: ${bolt11.substring(0, 50)}...');
+                            setModalState(() {
+                              generatedInvoice = bolt11;
+                              isGenerating = false;
+                            });
+                          } else {
+                            throw Exception(result?['error'] ?? 'Falha ao gerar invoice');
+                          }
+                        } catch (e) {
+                          debugPrint('❌ Erro ao gerar invoice: $e');
+                          setModalState(() {
+                            isGenerating = false;
+                            errorMsg = e.toString();
+                          });
+                        }
+                      },
+                      icon: isGenerating
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.qr_code),
+                      label: Text(isGenerating ? 'Gerando...' : 'Gerar Invoice (QR Code)'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4CAF50),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ] else ...[
+                  // Mostrar QR Code da Invoice
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: QrImageView(
+                        data: generatedInvoice!,
+                        version: QrVersions.auto,
+                        size: 200,
+                        backgroundColor: Colors.white,
+                        eyeStyle: const QrEyeStyle(
+                          eyeShape: QrEyeShape.square,
+                          color: Colors.black,
+                        ),
+                        dataModuleStyle: const QrDataModuleStyle(
+                          dataModuleShape: QrDataModuleShape.square,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Invoice text (truncada)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${generatedInvoice!.substring(0, 25)}...${generatedInvoice!.substring(generatedInvoice!.length - 10)}',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.copy, color: Color(0xFF4CAF50)),
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: generatedInvoice!));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('✅ Invoice copiada!'),
+                                backgroundColor: Color(0xFF4CAF50),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  
+                  // Botão nova invoice
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton.icon(
+                      onPressed: () {
+                        setModalState(() {
+                          generatedInvoice = null;
+                          errorMsg = null;
+                        });
+                      },
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Gerar nova invoice'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ==================== HISTÓRICO ====================
+  Widget _buildPaymentsHistory() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Histórico de Transações',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (_payments.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A1A),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF333333)),
+            ),
+            child: Column(
+              children: [
+                Icon(Icons.history, color: Colors.white.withOpacity(0.3), size: 48),
+                const SizedBox(height: 12),
+                Text(
+                  'Nenhuma transação ainda',
+                  style: TextStyle(color: Colors.white.withOpacity(0.5)),
+                ),
+              ],
+            ),
+          )
+        else
+          ...(_payments.take(15).map((payment) => _buildPaymentItem(payment))),
+      ],
+    );
+  }
+
+  Widget _buildPaymentItem(Map<String, dynamic> payment) {
+    final isReceived = payment['type'] == 'received' || 
+                       payment['direction'] == 'incoming' ||
+                       payment['type'] == 'Receive';
+    final amount = payment['amountSats'] ?? payment['amount'] ?? 0;
+    final status = payment['status']?.toString() ?? '';
+    final date = payment['createdAt'] ?? payment['timestamp'];
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF333333)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: isReceived
+                  ? Colors.green.withOpacity(0.2)
+                  : Colors.red.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Icon(
+              isReceived ? Icons.arrow_downward : Icons.arrow_upward,
+              color: isReceived ? Colors.green : Colors.red,
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isReceived ? 'Recebido' : 'Enviado',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+                if (date != null)
+                  Text(
+                    _formatDate(date),
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.5),
+                      fontSize: 11,
+                    ),
+                  ),
+                if (status.isNotEmpty && status != 'Complete')
+                  Text(
+                    status,
+                    style: TextStyle(
+                      color: Colors.orange.withOpacity(0.8),
+                      fontSize: 10,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Text(
+            '${isReceived ? '+' : '-'}$amount sats',
+            style: TextStyle(
+              color: isReceived ? Colors.green : Colors.red,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(dynamic date) {
+    if (date == null) return '';
+    try {
+      if (date is DateTime) {
+        return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+      }
+      final str = date.toString();
+      if (str.length >= 16) {
+        return str.substring(0, 16).replaceAll('T', ' ');
+      }
+      return str;
+    } catch (e) {
+      return date.toString();
+    }
+  }
+}

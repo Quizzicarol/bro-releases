@@ -2,14 +2,42 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Serviço para rastrear taxas da plataforma
-/// Registra todas as taxas de 2% que devem ser coletadas
+/// 
+/// MODO ATUAL: TRACKING ONLY
+/// - Taxas vão 100% para provedores
+/// - Este serviço apenas REGISTRA as taxas para análise futura
+/// - Quando tivermos servidor próprio ou Breez Spark permitir split,
+///   ativaremos a coleta automática via [enableAutoCollection]
+/// 
+/// MODO FUTURO: AUTO COLLECTION (quando disponível)
+/// - Pagamentos passam pela carteira master (PlatformWalletService)
+/// - Split automático: 98% provedor / 2% plataforma
 class PlatformFeeService {
   static const String _feeRecordsKey = 'platform_fee_records';
   static const String _totalCollectedKey = 'platform_total_collected';
-  static const double platformFeePercent = 0.02; // 2%
+  static const String _autoCollectionKey = 'platform_auto_collection_enabled';
+  
+  /// Taxa da plataforma (2%)
+  /// Atualmente apenas registrada, não cobrada
+  static const double platformFeePercent = 0.02;
+  
+  /// Verifica se a coleta automática está habilitada
+  /// DESABILITADO até termos infraestrutura própria
+  static Future<bool> isAutoCollectionEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_autoCollectionKey) ?? false;
+  }
+  
+  /// Habilita/desabilita coleta automática
+  /// USE APENAS quando tivermos servidor próprio ou Breez permitir
+  static Future<void> setAutoCollection(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_autoCollectionKey, enabled);
+  }
 
-  /// Registra uma taxa de transação
+  /// Registra uma taxa de transação (TRACKING ONLY)
   /// Chamado quando um pagamento é confirmado
+  /// A taxa é registrada mas NÃO cobrada do provedor
   static Future<void> recordFee({
     required String orderId,
     required double transactionBrl,

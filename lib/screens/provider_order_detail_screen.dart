@@ -322,8 +322,29 @@ class _ProviderOrderDetailScreenState extends State<ProviderOrderDetailScreen> {
 
   Widget _buildContent() {
     final amount = (_orderDetails!['amount'] as num).toDouble();
-    final paymentType = _orderDetails!['payment_type'] as String? ?? 'pix';
-    final paymentData = _orderDetails!['payment_data'] as Map<String, dynamic>?;
+    // Usar billType e billCode diretamente do modelo Order
+    final billType = _orderDetails!['billType'] as String? ?? 
+                     _orderDetails!['bill_type'] as String? ?? 
+                     _orderDetails!['payment_type'] as String? ?? 'pix';
+    final billCode = _orderDetails!['billCode'] as String? ?? 
+                     _orderDetails!['bill_code'] as String? ?? '';
+    
+    // Construir payment_data a partir dos campos do Order se não existir
+    Map<String, dynamic>? paymentData = _orderDetails!['payment_data'] as Map<String, dynamic>?;
+    if (paymentData == null && billCode.isNotEmpty) {
+      // Criar payment_data baseado no tipo de conta
+      if (billType.toLowerCase() == 'pix' || billCode.length > 30) {
+        paymentData = {
+          'pix_code': billCode,
+          'pix_key': _extractPixKey(billCode),
+        };
+      } else {
+        paymentData = {
+          'barcode': billCode,
+        };
+      }
+    }
+    
     final providerFee = amount * EscrowService.providerFeePercent / 100;
 
     return SingleChildScrollView(
@@ -339,9 +360,9 @@ class _ProviderOrderDetailScreenState extends State<ProviderOrderDetailScreen> {
           _buildStatusCard(),
           const SizedBox(height: 16),
 
-          // Dados de pagamento
-          if (paymentData != null) ...[
-            _buildPaymentDataCard(paymentType, paymentData),
+          // Dados de pagamento - SEMPRE mostrar se tiver billCode
+          if (paymentData != null && paymentData.isNotEmpty) ...[
+            _buildPaymentDataCard(billType, paymentData),
             const SizedBox(height: 16),
           ],
 
@@ -482,6 +503,20 @@ class _ProviderOrderDetailScreenState extends State<ProviderOrderDetailScreen> {
     );
   }
 
+  /// Extrai a chave PIX de um código PIX (se possível)
+  String _extractPixKey(String pixCode) {
+    // Se for um código PIX copia-e-cola longo, tentar extrair a chave
+    if (pixCode.startsWith('00020126')) {
+      // Código PIX EMV - retornar "Ver código abaixo"
+      return 'Ver código abaixo';
+    }
+    // Se for curto, provavelmente é a própria chave
+    if (pixCode.length < 50) {
+      return pixCode;
+    }
+    return 'Ver código abaixo';
+  }
+
   Map<String, dynamic> _getStatusInfo(String status) {
     switch (status) {
       case 'pending':
@@ -531,12 +566,16 @@ class _ProviderOrderDetailScreenState extends State<ProviderOrderDetailScreen> {
   }
 
   Widget _buildPaymentDataCard(String type, Map<String, dynamic> data) {
+    final isPix = type.toLowerCase() == 'pix' || 
+                  data['pix_code'] != null || 
+                  (data['barcode'] == null && data['pix_key'] != null);
+    
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: const Color(0xFF1E1E1E),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: Colors.orange.withOpacity(0.5), width: 2),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -545,32 +584,47 @@ class _ProviderOrderDetailScreenState extends State<ProviderOrderDetailScreen> {
             children: [
               Icon(_getPaymentIcon(type), color: Colors.orange, size: 24),
               const SizedBox(width: 8),
-              Text(
-                'Dados para Pagamento',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+              Expanded(
+                child: Text(
+                  '⚡ PAGAR ESTA CONTA',
+                  style: const TextStyle(
+                    color: Colors.orange,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          Text(
+            isPix ? 'Copie o código PIX abaixo e pague no seu banco' 
+                  : 'Copie o código de barras abaixo e pague',
+            style: TextStyle(color: Colors.white70, fontSize: 13),
+          ),
           const SizedBox(height: 16),
           const Divider(color: Colors.white12),
           const SizedBox(height: 16),
-          if (type.toLowerCase() == 'pix') ...[
-            _buildPaymentField('Chave PIX', data['pix_key'] as String? ?? 'N/A'),
+          
+          if (isPix) ...[
+            // Mostrar chave PIX se não for "Ver código abaixo"
+            if (data['pix_key'] != null && data['pix_key'] != 'Ver código abaixo')
+              _buildPaymentField('Chave PIX', data['pix_key'] as String),
             if (data['pix_name'] != null)
               _buildPaymentField('Nome', data['pix_name'] as String),
+            // SEMPRE mostrar o código PIX se existir
             if (data['pix_code'] != null) ...[
               const SizedBox(height: 12),
-              _buildCopyableField('Código PIX', data['pix_code'] as String),
+              _buildCopyableField('📋 Código PIX (Copia e Cola)', data['pix_code'] as String),
             ],
-          ] else if (type.toLowerCase() == 'boleto') ...[
-            _buildPaymentField('Banco', data['bank'] as String? ?? 'N/A'),
+          ] else ...[
+            // Boleto
+            if (data['bank'] != null)
+              _buildPaymentField('Banco', data['bank'] as String),
+            // SEMPRE mostrar o código de barras se existir
             if (data['barcode'] != null) ...[
               const SizedBox(height: 12),
-              _buildCopyableField('Código de Barras', data['barcode'] as String),
+              _buildCopyableField('📋 Código de Barras', data['barcode'] as String),
             ],
           ],
         ],

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import '../services/storage_service.dart';
 import '../services/nip06_service.dart';
+import '../providers/breez_provider_export.dart';
 
 class Nip06BackupScreen extends StatefulWidget {
   const Nip06BackupScreen({Key? key}) : super(key: key);
@@ -128,12 +130,24 @@ class _Nip06BackupScreenState extends State<Nip06BackupScreen> {
       );
       
       // Também salvar a seed
-      await _storage.saveBreezMnemonic(_mnemonicController.text.trim());
+      final newMnemonic = _mnemonicController.text.trim();
+      await _storage.saveBreezMnemonic(newMnemonic);
+      
+      // Reinicializar carteira Lightning com nova seed
+      if (mounted) {
+        try {
+          final breezProvider = context.read<BreezProvider>();
+          await breezProvider.reinitializeWithNewSeed(newMnemonic);
+          debugPrint('✅ Carteira Lightning reinicializada com nova seed');
+        } catch (e) {
+          debugPrint('⚠️ Erro ao reinicializar carteira: $e');
+        }
+      }
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('✅ Chaves derivadas e salvas com sucesso!'),
+            content: Text('✅ Chaves e carteira restauradas com sucesso!'),
             backgroundColor: Colors.green,
           ),
         );

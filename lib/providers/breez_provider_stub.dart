@@ -74,6 +74,12 @@ class BreezProvider with ChangeNotifier {
     return {'received': false, 'amount': 0};
   }
 
+  /// Reinicializar SDK com nova seed (stub - não faz nada em plataformas não-suportadas)
+  Future<bool> reinitializeWithNewSeed(String mnemonic) async {
+    debugPrint('⚠️ Breez SDK não disponível nesta plataforma');
+    return false;
+  }
+
   Future<void> disconnect() async {}
   
   @override

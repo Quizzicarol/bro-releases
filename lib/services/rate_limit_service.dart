@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 /// Serviço de Rate Limiting para prevenir abuso
 /// Limita tentativas de operações sensíveis por período de tempo

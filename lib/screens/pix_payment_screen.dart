@@ -27,8 +27,8 @@ class _PixPaymentScreenState extends State<PixPaymentScreen> {
   
   bool _isProcessing = false;
   bool _paymentSuccess = false;
-  String? _pixCode;
   Map<String, dynamic>? _pixData;
+  String? _pixCode;
 
   @override
   void dispose() {

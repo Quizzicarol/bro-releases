@@ -1,5 +1,6 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter/services.dart';
 import '../services/provider_service.dart';
 import '../services/storage_service.dart';
 import '../widgets/gradient_button.dart';
@@ -556,6 +557,35 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen> {
   }
 
   void _showOrderDetails(Map<String, dynamic> order) {
+    // Debug: mostrar todos os campos da ordem
+    debugPrint('📦 Order data: $order');
+    debugPrint('📦 Order keys: ${order.keys.toList()}');
+    
+    // Tentar pegar billCode de várias fontes possíveis
+    String billCode = order['billCode'] ?? 
+                      order['bill_code'] ?? 
+                      order['pixCode'] ?? 
+                      order['pix_code'] ?? 
+                      order['code'] ?? 
+                      (order['metadata']?['billCode']) ?? 
+                      (order['metadata']?['pixCode']) ?? 
+                      (order['metadata']?['code']) ?? 
+                      '';
+    
+    final status = order['status'] ?? '';
+    
+    // Tentar pegar userPubkey de várias fontes
+    String userPubkey = order['userPubkey'] ?? 
+                        order['user_pubkey'] ?? 
+                        order['pubkey'] ?? 
+                        order['nostrPubkey'] ?? 
+                        (order['metadata']?['userPubkey']) ?? 
+                        (order['metadata']?['pubkey']) ?? 
+                        '';
+    
+    debugPrint('📋 billCode encontrado: ${billCode.isNotEmpty ? billCode.substring(0, min(20, billCode.length)) + "..." : "VAZIO"}');
+    debugPrint('👤 userPubkey encontrado: ${userPubkey.isNotEmpty ? userPubkey.substring(0, min(16, userPubkey.length)) + "..." : "VAZIO"}');
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -569,10 +599,108 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen> {
             children: [
               _buildDetailRow('Valor', 'R\$ ${(order['amount'] ?? 0).toStringAsFixed(2)}'),
               _buildDetailRow('Tipo', order['billType'] ?? 'N/A'),
-              _buildDetailRow('Status', order['status'] ?? 'N/A'),
+              _buildDetailRow('Status', status),
               _buildDetailRow('Bitcoin', '${order['btcAmount'] ?? 0} BTC'),
-              if (order['billCode'] != null)
-                _buildDetailRow('Código', order['billCode'].substring(0, 20) + '...'),
+              
+              // Código da conta - CRÍTICO para o provedor
+              if (billCode.isNotEmpty) ...[  
+                const SizedBox(height: 16),
+                const Text(
+                  '📋 Código da Conta (copie para pagar):',
+                  style: TextStyle(
+                    color: Color(0xFFFF6B35),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF333333)),
+                  ),
+                  child: Column(
+                    children: [
+                      SelectableText(
+                        billCode,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: billCode));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('✅ Código copiado!'),
+                                backgroundColor: Color(0xFF4CAF50),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.copy, size: 18),
+                          label: const Text('Copiar Código'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFFF6B35),
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                // Mostrar aviso se não houver código
+                const SizedBox(height: 16),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                  ),
+                  child: const Text(
+                    '⚠️ Código da conta não disponível para esta ordem',
+                    style: TextStyle(
+                      color: Colors.orange,
+                      fontSize: 12,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+              
+              // Botão para falar com usuário - disponível em qualquer ordem com userPubkey
+              if (userPubkey.isNotEmpty) ...[  
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      Navigator.pushNamed(
+                        context, 
+                        '/nostr-messages',
+                        arguments: {'recipientPubkey': userPubkey},
+                      );
+                    },
+                    icon: const Icon(Icons.chat, size: 18),
+                    label: const Text('Falar com Usuário'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2196F3),
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

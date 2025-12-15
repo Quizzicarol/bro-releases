@@ -13,11 +13,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _showSeed = false;
   String? _mnemonic;
   bool _isLoading = true;
+  int _adminTapCount = 0;
 
   @override
   void initState() {
     super.initState();
     _loadMnemonic();
+  }
+
+  void _onTitleTap() {
+    _adminTapCount++;
+    if (_adminTapCount >= 7) {
+      _adminTapCount = 0;
+      Navigator.pushNamed(context, '/admin-bro-2024');
+    } else if (_adminTapCount >= 4) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${7 - _adminTapCount} toques restantes...'),
+          duration: const Duration(milliseconds: 500),
+          backgroundColor: Colors.deepPurple,
+        ),
+      );
+    }
   }
 
   Future<void> _loadMnemonic() async {
@@ -82,7 +99,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Configurações'),
+        title: GestureDetector(
+          onTap: _onTitleTap,
+          child: const Text('Configurações'),
+        ),
         backgroundColor: Colors.deepPurple,
         foregroundColor: Colors.white,
       ),
@@ -376,6 +396,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             vertical: 10,
                           ),
                           onTap: () => Navigator.pushNamed(context, '/nip06-backup'),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 30),
+
+                  // Suporte
+                  const Text(
+                    'Suporte',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.deepPurple,
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+
+                  Card(
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: Column(
+                      children: [
+                        ListTile(
+                          leading: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.purple.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.chat_bubble_outline, color: Colors.purple),
+                          ),
+                          title: const Text('Mensagens Nostr'),
+                          subtitle: const Text('Chat privado P2P criptografado'),
+                          trailing: const Icon(Icons.chevron_right),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 10,
+                          ),
+                          onTap: () => Navigator.pushNamed(context, '/nostr-messages'),
+                        ),
+                        const Divider(height: 1),
+                        ListTile(
+                          leading: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.help_outline, color: Colors.blue),
+                          ),
+                          title: const Text('Central de Ajuda'),
+                          subtitle: const Text('Dúvidas frequentes'),
+                          trailing: const Icon(Icons.chevron_right),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 10,
+                          ),
+                          onTap: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Em breve: Central de Ajuda'),
+                                backgroundColor: Colors.blue,
+                              ),
+                            );
+                          },
                         ),
                       ],
                     ),
