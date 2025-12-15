@@ -119,7 +119,7 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
         title: const Text('Cancelar Ordem?'),
         content: const Text(
           'Tem certeza que deseja cancelar esta ordem?\n\n'
-          'Seus Bitcoin serão devolvidos automaticamente.',
+          'Seus sats permanecerão na sua carteira do app.',
         ),
         actions: [
           TextButton(
@@ -160,13 +160,9 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
       }
 
       if (success) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Ordem cancelada com sucesso'),
-            backgroundColor: Colors.green,
-          ),
-        );
         _loadOrders(); // Recarregar lista
+        // Mostrar modal com instruções de saque
+        _showWithdrawInstructions();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -176,6 +172,147 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
         );
       }
     }
+  }
+
+  void _showWithdrawInstructions() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green, size: 28),
+            const SizedBox(width: 10),
+            const Text('Ordem Cancelada'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.blue),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Seus sats continuam seguros na sua carteira!',
+                        style: TextStyle(
+                          color: Colors.blue,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'O que deseja fazer com seus sats?',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _buildOptionCard(
+                icon: Icons.refresh,
+                title: 'Criar nova ordem',
+                description: 'Usar os sats para pagar outra conta',
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.pushNamed(context, '/');
+                },
+              ),
+              const SizedBox(height: 12),
+              _buildOptionCard(
+                icon: Icons.send,
+                title: 'Sacar para outra carteira',
+                description: 'Enviar sats via Lightning',
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.pushNamed(context, '/wallet');
+                },
+              ),
+              const SizedBox(height: 12),
+              _buildOptionCard(
+                icon: Icons.account_balance_wallet,
+                title: 'Manter na carteira',
+                description: 'Guardar para usar depois',
+                onTap: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fechar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOptionCard({
+    required IconData icon,
+    required String title,
+    required String description,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.deepPurple.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: Colors.deepPurple),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    description,
+                    style: TextStyle(
+                      color: Colors.grey.shade600,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.grey),
+          ],
+        ),
+      ),
+    );
   }
 
   @override

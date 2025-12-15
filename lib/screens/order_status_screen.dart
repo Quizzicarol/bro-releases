@@ -184,7 +184,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
         title: const Text('Cancelar Ordem?'),
         content: const Text(
           'Tem certeza que deseja cancelar esta ordem?\n\n'
-          'Seus Bitcoin serão devolvidos automaticamente.',
+          'Seus sats permanecerão na sua carteira do app.',
         ),
         actions: [
           TextButton(
@@ -205,34 +205,244 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     if (confirm == true) {
       setState(() => _isLoading = true);
       
-      final success = await _orderService.cancelOrder(
-        orderId: widget.orderId,
-        userId: widget.userId ?? '',
-        reason: 'Cancelado pelo usuário',
-      );
-
-      if (success) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✅ Ordem cancelada! Seus fundos serão devolvidos.'),
-              backgroundColor: Colors.green,
-            ),
-          );
-          Navigator.pop(context); // Voltar para home
+      bool success = false;
+      
+      // Se estiver em modo teste, cancelar localmente
+      if (AppConfig.testMode) {
+        try {
+          final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+          await orderProvider.updateOrderStatusLocal(widget.orderId, 'cancelled');
+          success = true;
+          debugPrint('✅ Ordem ${widget.orderId} cancelada localmente');
+        } catch (e) {
+          debugPrint('❌ Erro ao cancelar ordem local: $e');
         }
       } else {
-        setState(() => _isLoading = false);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('❌ Erro ao cancelar ordem'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        success = await _orderService.cancelOrder(
+          orderId: widget.orderId,
+          userId: widget.userId ?? '',
+          reason: 'Cancelado pelo usuário',
+        );
+      }
+
+      setState(() => _isLoading = false);
+
+      if (success && mounted) {
+        // Mostrar modal com instruções de saque
+        _showWithdrawInstructions();
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ Erro ao cancelar ordem'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
+  }
+
+  void _showWithdrawInstructions() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green, size: 28),
+            const SizedBox(width: 10),
+            const Text('Ordem Cancelada'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.blue),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Seus sats continuam seguros na sua carteira!',
+                        style: TextStyle(
+                          color: Colors.blue,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'O que deseja fazer com seus sats?',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _buildWithdrawOptionCard(
+                icon: Icons.refresh,
+                title: 'Criar nova ordem',
+                description: 'Usar os sats para pagar outra conta',
+                onTap: () {
+                  Navigator.pop(context); // Fechar dialog
+                  Navigator.pop(context); // Voltar da tela de status
+                  // Navegar para home
+                },
+              ),
+              const SizedBox(height: 12),
+              _buildWithdrawOptionCard(
+                icon: Icons.send,
+                title: 'Sacar para outra carteira',
+                description: 'Enviar sats via Lightning',
+                onTap: () {
+                  Navigator.pop(context); // Fechar dialog
+                  Navigator.pop(context); // Voltar da tela de status
+                  Navigator.pushNamed(context, '/wallet');
+                },
+              ),
+              const SizedBox(height: 12),
+              _buildWithdrawOptionCard(
+                icon: Icons.account_balance_wallet,
+                title: 'Manter na carteira',
+                description: 'Guardar para usar depois',
+                onTap: () {
+                  Navigator.pop(context); // Fechar dialog
+                  Navigator.pop(context); // Voltar da tela de status
+                },
+              ),
+              const SizedBox(height: 20),
+              const Divider(),
+              const SizedBox(height: 12),
+              const Text(
+                '📋 Como sacar para outra carteira:',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _buildStepItem(1, 'Vá em "Carteira" no menu'),
+              _buildStepItem(2, 'Toque em "Enviar"'),
+              _buildStepItem(3, 'Cole o invoice Lightning da carteira destino'),
+              _buildStepItem(4, 'Confirme o envio'),
+            ],
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context); // Fechar dialog
+              Navigator.pop(context); // Voltar da tela de status
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepPurple,
+            ),
+            child: const Text('Entendi'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWithdrawOptionCard({
+    required IconData icon,
+    required String title,
+    required String description,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.deepPurple.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: Colors.deepPurple),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    description,
+                    style: TextStyle(
+                      color: Colors.grey.shade600,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.grey),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStepItem(int step, String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: Colors.deepPurple,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Center(
+              child: Text(
+                '$step',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
