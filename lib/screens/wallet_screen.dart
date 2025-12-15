@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import '../providers/breez_provider_export.dart';
 
 /// Tela de Carteira Lightning - Apenas BOLT11 (invoice)
@@ -413,6 +414,32 @@ class _WalletScreenState extends State<WalletScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 12),
+                
+                // Botão Scanear QR
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: isSending ? null : () async {
+                      Navigator.pop(context); // Fechar modal atual
+                      final scannedInvoice = await _showQRScanner();
+                      if (scannedInvoice != null && scannedInvoice.isNotEmpty) {
+                        // Reabrir o dialog com a invoice escaneada
+                        _showSendDialogWithInvoice(scannedInvoice);
+                      }
+                    },
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('Escanear QR Code'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.green,
+                      side: const BorderSide(color: Colors.green),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 16),
                 
                 // Botão Enviar
@@ -565,6 +592,320 @@ class _WalletScreenState extends State<WalletScreen> {
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ==================== QR SCANNER ====================
+  Future<String?> _showQRScanner() async {
+    String? scannedCode;
+    
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.black,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SizedBox(
+        height: MediaQuery.of(context).size.height * 0.75,
+        child: Column(
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                color: Color(0xFF1A1A1A),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.qr_code_scanner, color: Colors.green, size: 28),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Escanear Invoice',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          'Aponte para o QR Code da invoice Lightning',
+                          style: TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white54),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            
+            // Scanner
+            Expanded(
+              child: MobileScanner(
+                onDetect: (capture) {
+                  final List<Barcode> barcodes = capture.barcodes;
+                  for (final barcode in barcodes) {
+                    final code = barcode.rawValue;
+                    if (code != null && 
+                        (code.toLowerCase().startsWith('lnbc') || 
+                         code.toLowerCase().startsWith('lntb') ||
+                         code.toLowerCase().startsWith('lightning:'))) {
+                      // Remover prefixo lightning: se existir
+                      scannedCode = code.toLowerCase().startsWith('lightning:') 
+                          ? code.substring(10) 
+                          : code;
+                      Navigator.pop(context);
+                      break;
+                    }
+                  }
+                },
+              ),
+            ),
+            
+            // Instruções
+            Container(
+              padding: const EdgeInsets.all(20),
+              color: const Color(0xFF1A1A1A),
+              child: const Column(
+                children: [
+                  Icon(Icons.lightbulb_outline, color: Colors.amber, size: 24),
+                  SizedBox(height: 8),
+                  Text(
+                    'Dica: O QR Code deve conter uma invoice Lightning (BOLT11) começando com "lnbc" ou "lntb"',
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontSize: 12,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    
+    return scannedCode;
+  }
+
+  // ==================== ENVIAR COM INVOICE PRÉ-PREENCHIDA ====================
+  void _showSendDialogWithInvoice(String invoice) {
+    final invoiceController = TextEditingController(text: invoice);
+    bool isSending = false;
+    
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1A1A1A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+              left: 20,
+              right: 20,
+              top: 20,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: Colors.green.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Icon(Icons.check_circle, color: Colors.green),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Invoice Escaneada!',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            'Confirme o pagamento',
+                            style: TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white54),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                
+                // Invoice preview
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2A2A2A),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.green.withOpacity(0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.bolt, color: Colors.amber, size: 16),
+                          SizedBox(width: 6),
+                          Text(
+                            'Lightning Invoice',
+                            style: TextStyle(
+                              color: Colors.amber,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        invoice.length > 60 
+                            ? '${invoice.substring(0, 30)}...${invoice.substring(invoice.length - 25)}'
+                            : invoice,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                
+                // Botão Enviar
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: isSending ? null : () async {
+                      setModalState(() => isSending = true);
+                      debugPrint('💸 Enviando pagamento escaneado...');
+                      
+                      try {
+                        final breezProvider = context.read<BreezProvider>();
+                        final result = await breezProvider.payInvoice(invoice);
+                        
+                        debugPrint('📨 Resultado: $result');
+                        
+                        if (result != null && result['success'] == true) {
+                          if (context.mounted) {
+                            Navigator.pop(context);
+                            _loadWalletInfo();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Row(
+                                  children: [
+                                    Icon(Icons.check_circle, color: Colors.white),
+                                    SizedBox(width: 8),
+                                    Text('✅ Pagamento enviado com sucesso!'),
+                                  ],
+                                ),
+                                backgroundColor: Colors.green,
+                                duration: Duration(seconds: 3),
+                              ),
+                            );
+                          }
+                        } else {
+                          setModalState(() => isSending = false);
+                          final errorMsg = result?['error'] ?? 'Falha ao enviar pagamento';
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(errorMsg),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        }
+                      } catch (e) {
+                        debugPrint('❌ Erro ao enviar: $e');
+                        setModalState(() => isSending = false);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Erro: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    icon: isSending
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.send),
+                    label: Text(isSending ? 'Enviando...' : 'Confirmar e Enviar'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                
+                // Botão Cancelar
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text(
+                      'Cancelar',
+                      style: TextStyle(color: Colors.white54),
                     ),
                   ),
                 ),
