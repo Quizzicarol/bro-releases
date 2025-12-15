@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'storage_service.dart';
 import 'nostr_service.dart';
 import 'pix_decoder_service.dart';
+import 'boleto_decoder_service.dart';
 import 'bitcoin_price_service.dart';
 import '../config.dart';
 
@@ -223,7 +224,20 @@ class ApiService {
 
   Future<Map<String, dynamic>?> validateBoleto(String code) async {
     try {
-      return await post('/api/validate-boleto', {'code': code});
+      // Usar decodificador local sempre (funciona com ou sem backend)
+      final result = BoletoDecoderService.decodeBoleto(code);
+      if (result != null) {
+        print('✅ Boleto decodificado localmente: ${result['merchantName']}, R\$ ${result['value']}');
+        return result;
+      }
+      
+      // Se decodificação local falhar e não estiver em test mode, tenta backend
+      if (!AppConfig.testMode) {
+        return await post('/api/validate-boleto', {'code': code});
+      }
+      
+      print('❌ Não foi possível decodificar o boleto');
+      return null;
     } catch (e) {
       print('❌ Erro ao validar boleto: $e');
       return null;

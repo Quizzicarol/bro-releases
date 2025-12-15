@@ -477,7 +477,7 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
       case 'accepted':
         return {
           'label': 'Aceito',
-          'color': Colors.blue,
+          'color': Colors.amber,
         };
       case 'awaiting_confirmation':
         return {
