@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 /// Serviço para decodificar códigos PIX localmente (sem backend)
 class PixDecoderService {
   /// Decodifica um código PIX copia e cola (formato EMV)

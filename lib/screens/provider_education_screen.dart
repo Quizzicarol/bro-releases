@@ -28,8 +28,8 @@ class ProviderEducationScreen extends StatelessWidget {
                 '2️⃣ Escolha ordens disponíveis na plataforma',
                 '3️⃣ Pague a conta no banco com seu dinheiro',
                 '4️⃣ Envie o comprovante de pagamento',
-                '5️⃣ Receba Bitcoin + 3% de taxa instantaneamente',
-                '6️⃣ Sua garantia é desbloqueada automaticamente',
+                '5️⃣ Receba 3% de cada operação por ser um Bro',
+                '6️⃣ Resgate sua garantia ao zerar suas ordens aceitas',
               ],
             ),
             const SizedBox(height: 24),
@@ -76,17 +76,17 @@ class ProviderEducationScreen extends StatelessWidget {
           const Icon(Icons.monetization_on, size: 64, color: Colors.orange),
           const SizedBox(height: 16),
           const Text(
-            'Ganhe Bitcoin Pagando Contas',
+            'Seja um Bro e receba Bitcoin',
             style: TextStyle(
               color: Colors.white,
-              fontSize: 24,
+              fontSize: 22,
               fontWeight: FontWeight.bold,
             ),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
           const Text(
-            'Seja um provedor e ganhe 3% de taxa em cada transação',
+            'Seja um provedor e ganhe 3% em cada troca que você facilitar',
             style: TextStyle(color: Colors.white70, fontSize: 14),
             textAlign: TextAlign.center,
           ),
@@ -187,21 +187,25 @@ class ProviderEducationScreen extends StatelessWidget {
     required bool isHeader,
   }) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       child: Row(
         children: [
           Expanded(
-            flex: 2,
+            flex: 3,
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.star, color: color, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  tier,
-                  style: TextStyle(
-                    color: color,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
+                Icon(Icons.star, color: color, size: 16),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    tier,
+                    style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -211,14 +215,15 @@ class ProviderEducationScreen extends StatelessWidget {
             flex: 2,
             child: Text(
               guarantee,
-              style: const TextStyle(color: Colors.orange, fontSize: 14),
+              style: const TextStyle(color: Colors.orange, fontSize: 12),
+              textAlign: TextAlign.center,
             ),
           ),
           Expanded(
-            flex: 2,
+            flex: 3,
             child: Text(
               maxOrder,
-              style: const TextStyle(color: Colors.white70, fontSize: 14),
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
               textAlign: TextAlign.right,
             ),
           ),
@@ -480,10 +485,7 @@ class ProviderEducationScreen extends StatelessWidget {
           question: 'O que acontece em disputa?',
           answer: 'A plataforma analisa os comprovantes. Se comprovar fraude, perde a garantia. Se for engano do usuário, recebe normalmente.',
         ),
-        _buildFAQItem(
-          question: 'Preciso de CNPJ?',
-          answer: 'Não! Qualquer pessoa pode ser provedor. Basta ter conta bancária e Bitcoin.',
-        ),
+
       ],
     );
   }

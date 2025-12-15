@@ -6,7 +6,6 @@ import 'package:confetti/confetti.dart';
 import 'dart:async';
 import '../providers/breez_provider_export.dart';
 import '../providers/order_provider.dart';
-import '../services/api_service.dart';
 import '../services/platform_fee_service.dart';
 
 class LightningPaymentScreen extends StatefulWidget {
@@ -103,20 +102,31 @@ class _LightningPaymentScreenState extends State<LightningPaymentScreen> {
           transactionBrl: widget.totalBrl,
           transactionSats: widget.amountSats,
           providerPubkey: widget.receiver ?? 'unknown',
-          clientPubkey: 'client', // TODO: pegar do contexto
+          clientPubkey: 'client',
         );
-        debugPrint(' Taxa da plataforma registrada: \ BRL');
+        debugPrint('Taxa da plataforma registrada');
       } catch (e) {
-        debugPrint(' Erro ao registrar taxa: \');
+        debugPrint('Erro ao registrar taxa: $e');
       }
 
+      // Mostrar mensagem e navegar para Minhas Ordens após 2 segundos
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Pagamento recebido com sucesso!'),
+          content: Text('Pagamento recebido! Agora aguarde um Bro aceitar sua ordem.'),
           backgroundColor: Colors.green,
           duration: Duration(seconds: 3),
         ),
       );
+
+      // Aguardar 2 segundos e navegar para Minhas Ordens
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          '/user-orders',
+          (route) => route.isFirst,
+          arguments: {'userId': 'user_test_001'},
+        );
+      }
     }
   }
 
@@ -175,6 +185,14 @@ class _LightningPaymentScreenState extends State<LightningPaymentScreen> {
                     data: widget.invoice,
                     size: 220,
                     backgroundColor: Colors.white,
+                    eyeStyle: const QrEyeStyle(
+                      eyeShape: QrEyeShape.square,
+                      color: Colors.black,
+                    ),
+                    dataModuleStyle: const QrDataModuleStyle(
+                      dataModuleShape: QrDataModuleShape.square,
+                      color: Colors.black,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -201,18 +219,30 @@ class _LightningPaymentScreenState extends State<LightningPaymentScreen> {
                 ),
                 const SizedBox(height: 16),
 
-                if (widget.receiver != null && widget.receiver!.isNotEmpty) ...[
-                  const Text('Destinatario:', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  Text(
-                    widget.receiver!,
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
-                    textAlign: TextAlign.center,
-                  ),
-                ] else ...[
-                  const SizedBox(height: 8),
-                  const Center(
-                    child: CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFF6B6B)),
+                // Mensagem de status
+                if (_isPaid) ...[
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.green),
+                    ),
+                    child: const Column(
+                      children: [
+                        Icon(Icons.check_circle, color: Colors.green, size: 32),
+                        SizedBox(height: 8),
+                        Text(
+                          'Pagamento confirmado!',
+                          style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Agora é só aguardar um Bro aceitar sua ordem.',
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
                     ),
                   ),
                 ],

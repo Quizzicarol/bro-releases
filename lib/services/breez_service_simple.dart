@@ -1,6 +1,7 @@
 // Serviço Lightning Simplificado (Mock - substitua com Breez SDK real)
 import 'dart:async';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 
 class BreezServiceSimple {
   static final BreezServiceSimple _instance = BreezServiceSimple._internal();
@@ -9,20 +10,18 @@ class BreezServiceSimple {
 
   bool _isInitialized = false;
   int _balance = 100000; // 100k sats de teste
-  String? _apiKey;
   
   // Callbacks
   Function(Map<String, dynamic>)? onPaymentReceived;
 
   // Inicializar
   Future<bool> initialize({required String apiKey, String? mnemonic}) async {
-    print('🔧 Inicializando Breez (Mock)...');
+    debugPrint('🔧 Inicializando Breez (Mock)...');
     await Future.delayed(const Duration(seconds: 1));
     
-    _apiKey = apiKey;
     _isInitialized = true;
     
-    print('✅ Breez inicializado (Mock)!');
+    debugPrint('✅ Breez inicializado (Mock)!');
     return true;
   }
 
@@ -33,7 +32,7 @@ class BreezServiceSimple {
   }) async {
     if (!_isInitialized) return null;
     
-    print('⚡ Criando invoice: $amountSats sats');
+    debugPrint('⚡ Criando invoice: $amountSats sats');
     
     final paymentHash = _generateHash();
     final invoice = _generateMockInvoice(amountSats);
@@ -53,7 +52,7 @@ class BreezServiceSimple {
   }) async {
     if (!_isInitialized) return null;
     
-    print('⚡ Pagando invoice (Mock)...');
+    debugPrint('⚡ Pagando invoice (Mock)...');
     await Future.delayed(const Duration(seconds: 1));
     
     final amount = amountSats ?? 1000;
@@ -70,7 +69,7 @@ class BreezServiceSimple {
   Future<Map<String, dynamic>?> createOnchainAddress() async {
     if (!_isInitialized) return null;
     
-    print('₿ Gerando endereço on-chain (Mock)...');
+    debugPrint('₿ Gerando endereço on-chain (Mock)...');
     
     return {
       'address': 'bc1q${_generateHash().substring(0, 38)}',
@@ -112,7 +111,7 @@ class BreezServiceSimple {
   // Desconectar
   Future<void> disconnect() async {
     _isInitialized = false;
-    print('🔌 Breez desconectado');
+    debugPrint('🔌 Breez desconectado');
   }
 
   // Helpers

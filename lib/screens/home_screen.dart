@@ -10,10 +10,8 @@ import '../services/storage_service.dart';
 import '../widgets/stat_card.dart';
 import '../widgets/gradient_button.dart';
 import '../widgets/transaction_card.dart';
-import '../widgets/first_time_seed_dialog.dart';
 import 'new_trade_screen.dart';
 import 'login_screen.dart';
-import 'provider_dashboard_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -215,35 +213,284 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildContent(BreezProvider breezProvider, OrderProvider orderProvider) {
     return ListView(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
       children: [
-        // Stats Row (4 cards)
-        _buildStatsRow(breezProvider, orderProvider),
-        const SizedBox(height: 12),
+        // Grade de Botões de Ação (3 botões)
+        _buildActionButtonsGrid(),
+        const SizedBox(height: 14),
 
-        // Action Buttons
-        _buildActionButtons(),
-        const SizedBox(height: 12),
+        // Métricas em linha horizontal
+        _buildMetricsRow(orderProvider),
+        const SizedBox(height: 16),
 
-        // Nostr Messages Button
-        _buildNostrMessagesButton(),
-        const SizedBox(height: 12),
-
-        // My Orders Button
-        _buildMyOrdersButton(),
-        const SizedBox(height: 12),
-
-        // Provider Mode Button
-        _buildProviderModeButton(),
-        const SizedBox(height: 12),
-
-        // Transactions List
+        // Lista de Ordens
         _buildTransactionsList(orderProvider),
 
         // Footer
         const SizedBox(height: 12),
         _buildFooter(),
+        
+        // Extra space
+        const SizedBox(height: 80),
       ],
+    );
+  }
+
+  Widget _buildActionButtonsGrid() {
+    return Column(
+      children: [
+        // Primeira linha: Nova Troca + Preço Bitcoin
+        Row(
+          children: [
+            // Nova Troca
+            Expanded(
+              child: _buildGridButton(
+                icon: Icons.swap_horiz,
+                label: 'Nova Troca',
+                gradient: const [Color(0xFFFF6B6B), Color(0xFFFF8A8A)],
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const NewTradeScreen()),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Preço do Bitcoin
+            Expanded(
+              child: _buildBitcoinPriceButton(),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        // Segunda linha: Minhas Ordens + Seja um Bro
+        Row(
+          children: [
+            // Minhas Ordens
+            Expanded(
+              child: _buildGridButton(
+                icon: Icons.receipt_long,
+                label: 'Minhas Ordens',
+                gradient: const [Color(0xFF4A90E2), Color(0xFF5BA3F5)],
+                onTap: () async {
+                  final storage = StorageService();
+                  final userId = await storage.getUserId() ?? 'temp';
+                  Navigator.pushNamed(
+                    context,
+                    '/user-orders',
+                    arguments: {'userId': userId},
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Seja um Bro
+            Expanded(
+              child: _buildGridButton(
+                icon: Icons.volunteer_activism,
+                label: 'Seja um Bro',
+                gradient: const [Color(0xFF3DE98C), Color(0xFF00CC7A)],
+                onTap: () {
+                  Navigator.pushNamed(context, '/provider-education');
+                },
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGridButton({
+    required IconData icon,
+    required String label,
+    required List<Color> gradient,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 90,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: gradient,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: gradient[0].withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: Colors.white, size: 28),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBitcoinPriceButton() {
+    final btcPriceFormatted = _btcPrice > 0 
+        ? _currencyFormat.format(_btcPrice) 
+        : 'R\$ --';
+
+    return Container(
+      height: 90,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            const Color(0xFFF7931A).withOpacity(0.3),
+            const Color(0xFFF7931A).withOpacity(0.15),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFFF7931A).withOpacity(0.4),
+        ),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Image.asset(
+            'assets/images/bitcoin-logo.png',
+            height: 24,
+            width: 24,
+          ),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                btcPriceFormatted,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricsRow(OrderProvider orderProvider) {
+    final totalBills = orderProvider.orders.length;
+    final pendingBills = orderProvider.orders.where((o) => o.status == 'pending').length;
+    final completedOrders = orderProvider.orders
+        .where((o) => o.status == 'completed')
+        .length;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF333333)),
+      ),
+      child: Row(
+        children: [
+          _buildMetricItem('📋', '$totalBills', 'Criadas'),
+          _buildMetricDivider(),
+          _buildMetricItem('⏳', '$pendingBills', 'Pendentes'),
+          _buildMetricDivider(),
+          _buildMetricItem('✅', '$completedOrders', 'Finalizadas'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricItem(String emoji, String value, String label) {
+    return Expanded(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 16)),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.6),
+              fontSize: 10,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricDivider() {
+    return Container(
+      width: 1,
+      height: 40,
+      color: const Color(0xFF333333),
+    );
+  }
+
+  Widget _buildBtcMetricItem(String value) {
+    return Expanded(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Image.asset(
+            'assets/images/bitcoin-logo.png',
+            height: 18,
+            width: 18,
+          ),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Text(
+            'BTC',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.6),
+              fontSize: 10,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -254,19 +501,19 @@ class _HomeScreenState extends State<HomeScreen> {
         .where((o) =>
           o.status == 'completed' &&
           o.createdAt != null &&
-          _isToday(o.createdAt!)
+          _isToday(o.createdAt)
         )
         .length;
 
     final btcPriceFormatted = _currencyFormat.format(_btcPrice);
 
     return GridView.count(
-      crossAxisCount: 2,
+      crossAxisCount: 4,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      crossAxisSpacing: 12,
-      mainAxisSpacing: 12,
-      childAspectRatio: 1.4,
+      crossAxisSpacing: 8,
+      mainAxisSpacing: 8,
+      childAspectRatio: 0.9,
       children: [
         StatCard(
           emoji: '📋',
@@ -297,45 +544,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildActionButtons() {
-    return Row(
-      children: [
-        Expanded(
-          child: GradientButton(
-            text: 'Nova Troca',
-            icon: Icons.swap_horiz,
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const NewTradeScreen()),
-              );
-            },
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: OutlinedButton.icon(
-            icon: const Icon(Icons.refresh, size: 18),
-            label: const Text('Atualizar'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFFF6B6B),
-              side: const BorderSide(color: Color(0xFFFF6B6B)),
-            ),
-            onPressed: () async {
-              await _loadData();
-              await _fetchBitcoinPrice();
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Dashboard atualizado!'),
-                    backgroundColor: Color(0xFFFF6B6B),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-              }
-            },
-          ),
-        ),
-      ],
+    return SizedBox(
+      width: double.infinity,
+      height: 60,
+      child: GradientButton(
+        text: 'Nova Troca',
+        icon: Icons.swap_horiz,
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const NewTradeScreen()),
+          );
+        },
+      ),
     );
   }
 

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import 'storage_service.dart';
 import 'nostr_service.dart';
 import 'pix_decoder_service.dart';

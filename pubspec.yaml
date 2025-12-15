@@ -56,6 +56,22 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.14.2
+
+# Configuração do ícone do app
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/bro_icon.png"
+  adaptive_icon_background: "#FF6B6B"
+  adaptive_icon_foreground: "assets/icon/bro_icon_foreground.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
+  web:
+    generate: true
+    image_path: "assets/icon/bro_icon.png"
+    background_color: "#FF6B6B"
+    theme_color: "#FF6B6B"
 
 flutter:
   uses-material-design: true
@@ -63,3 +79,4 @@ flutter:
   assets:
     - assets/images/
     - assets/logo.png
+    - assets/icon/

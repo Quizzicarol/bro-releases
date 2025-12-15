@@ -295,6 +295,10 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                 const SizedBox(height: 12),
                 _buildCancelButton(),
               ],
+              // Botão cancelar também para confirmed (aguardando Bro)
+              if (_currentStatus == 'confirmed') ...[
+                _buildCancelButton(),
+              ],
               if (_currentStatus == 'awaiting_confirmation') ...[
                 _buildConfirmPaymentButton(),
                 const SizedBox(height: 12),
@@ -303,6 +307,8 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
               // Botão de disputa também disponível para status 'accepted' (provedor aceitou mas não enviou comprovante)
               if (_currentStatus == 'accepted') ...[
                 const SizedBox(height: 16),
+                _buildTalkToBroButton(),
+                const SizedBox(height: 12),
                 _buildDisputeButton(),
               ],
               // Status de disputa
@@ -1294,6 +1300,40 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
         style: OutlinedButton.styleFrom(
           foregroundColor: const Color(0xFFFF6B6B),
           side: const BorderSide(color: Color(0xFFFF6B6B)),
+          padding: const EdgeInsets.symmetric(vertical: 16),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTalkToBroButton() {
+    final providerId = _orderDetails?['provider_id'] ?? '';
+    final broName = providerId.isNotEmpty ? providerId.substring(0, 8) : 'Bro';
+    
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: () {
+          if (providerId.isNotEmpty) {
+            Navigator.pushNamed(
+              context,
+              '/nostr-messages',
+              arguments: {'contactPubkey': providerId},
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('ID do Bro não disponível'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        },
+        icon: const Icon(Icons.chat),
+        label: Text('Falar com $broName'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF9C27B0),
+          foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(vertical: 16),
         ),
       ),

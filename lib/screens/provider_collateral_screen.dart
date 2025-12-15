@@ -22,8 +22,6 @@ class ProviderCollateralScreen extends StatefulWidget {
 
 class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
   CollateralTier? _selectedTier;
-  bool _showingInvoice = false;
-  String? _currentInvoice;
 
   @override
   void initState() {

@@ -37,7 +37,7 @@ class StatCard extends StatelessWidget {
             onTap: onTap,
             borderRadius: BorderRadius.circular(16),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -48,20 +48,20 @@ class StatCard extends StatelessWidget {
                   else if (emoji != null)
                     Text(
                       emoji!,
-                      style: const TextStyle(fontSize: 28),
+                      style: const TextStyle(fontSize: 20),
                     ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 3),
 
                   // Value
                   Flexible(
                     child: Container(
-                      constraints: const BoxConstraints(minHeight: 20),
+                      constraints: const BoxConstraints(minHeight: 16),
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
                         child: Text(
                           value,
                           style: const TextStyle(
-                            fontSize: 18,
+                            fontSize: 14,
                             fontWeight: FontWeight.w700,
                             color: Colors.white,
                           ),
@@ -71,13 +71,13 @@ class StatCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
 
                   // Label
                   Text(
                     label,
                     style: const TextStyle(
-                      fontSize: 11,
+                      fontSize: 9,
                       color: Color(0xCCFFFFFF), // rgba(255, 255, 255, 0.8)
                       fontWeight: FontWeight.w400,
                       height: 1.2,

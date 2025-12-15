@@ -148,8 +148,13 @@ class BitcoinPaymentDialog extends StatelessWidget {
                 data: lightningInvoice!,
                 version: QrVersions.auto,
                 size: 220,
+                backgroundColor: Colors.white,
                 eyeStyle: const QrEyeStyle(
                   eyeShape: QrEyeShape.square,
+                  color: Colors.black,
+                ),
+                dataModuleStyle: const QrDataModuleStyle(
+                  dataModuleShape: QrDataModuleShape.square,
                   color: Colors.black,
                 ),
               ),
@@ -264,8 +269,13 @@ class BitcoinPaymentDialog extends StatelessWidget {
                 data: onchainAddress!,
                 version: QrVersions.auto,
                 size: 220,
+                backgroundColor: Colors.white,
                 eyeStyle: const QrEyeStyle(
                   eyeShape: QrEyeShape.square,
+                  color: Colors.black,
+                ),
+                dataModuleStyle: const QrDataModuleStyle(
+                  dataModuleShape: QrDataModuleShape.square,
                   color: Colors.black,
                 ),
               ),

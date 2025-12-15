@@ -163,10 +163,6 @@ class _OfferScreenState extends State<OfferScreen> {
               ),
               const SizedBox(height: 8),
               _buildPriceHint(),
-              const SizedBox(height: 24),
-
-              // Opcao de fotos privadas
-              _buildPhotoOption(),
               const SizedBox(height: 32),
 
               // Botao publicar

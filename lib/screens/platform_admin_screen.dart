@@ -26,9 +26,6 @@ class _PlatformAdminScreenState extends State<PlatformAdminScreen> {
   // Sua Lightning Address para receber as taxas
   // ALTERE PARA SUA LIGHTNING ADDRESS REAL
   static const String platformLightningAddress = 'carol@areabitcoin.com.br';
-  
-  // Seu endereço Bitcoin on-chain (opcional)
-  static const String platformBitcoinAddress = ''; // Preencha se quiser
 
   @override
   void initState() {
@@ -236,6 +233,33 @@ class _PlatformAdminScreenState extends State<PlatformAdminScreen> {
       ),
       child: Column(
         children: [
+          // Status do modo
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.blue.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.blue.withOpacity(0.5)),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.info_outline, color: Colors.blue, size: 16),
+                SizedBox(width: 6),
+                Text(
+                  'MODO: TRACKING ONLY',
+                  style: TextStyle(color: Colors.blue, fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Taxas vão 100% para provedores\nAqui apenas registramos para análise',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white38, fontSize: 10),
+          ),
+          const SizedBox(height: 16),
           const Text(
             '💰 TAXAS DA PLATAFORMA (2%)',
             style: TextStyle(

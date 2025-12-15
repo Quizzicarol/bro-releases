@@ -10,10 +10,8 @@ import 'package:intl/intl.dart';
 import '../providers/order_provider.dart';
 import '../providers/breez_provider_export.dart';
 import '../widgets/fee_breakdown_card.dart';
-import '../services/payment_monitor_service.dart';
-import '../services/storage_service.dart';
-import '../services/order_service.dart';
 import 'onchain_payment_screen.dart';
+import 'lightning_payment_screen.dart';
 
 class PaymentScreen extends StatefulWidget {
   const PaymentScreen({Key? key}) : super(key: key);
@@ -327,6 +325,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         context: context,
         barrierDismissible: true,
         builder: (ctx) {
+          debugPrint('🎨 DIALOG BUILDER CHAMADO - invoice length: ${invoice.length}');
           return WillPopScope(
             onWillPop: () async {
               // Cancelar listener ao fechar o dialog
@@ -352,6 +351,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
                         version: QrVersions.auto,
                         size: 220,
                         backgroundColor: Colors.white,
+                        eyeStyle: const QrEyeStyle(
+                          eyeShape: QrEyeShape.square,
+                          color: Colors.black,
+                        ),
+                        dataModuleStyle: const QrDataModuleStyle(
+                          dataModuleShape: QrDataModuleShape.square,
+                          color: Colors.black,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -620,23 +627,28 @@ class _PaymentScreenState extends State<PaymentScreen> {
             _showError('Invoice inválida recebida');
             return;
           }
-          debugPrint('✅ Invoice válida, abrindo dialog...');
+          debugPrint('✅ Invoice válida, navegando para LightningPaymentScreen...');
           
           if (!mounted) return;
           
-          // Reset processing flag before showing dialog
+          // Reset processing flag before navigating
           setState(() {
             _isProcessing = false;
           });
           
-          // Show inline Lightning payment dialog with polling
-          await _showLightningInvoiceDialog(
-            invoice: inv,
-            paymentHash: (invoiceData['paymentHash'] ?? '') as String,
-            amountSats: amountSats,
-            totalBrl: totalBrl,
-            orderId: order.id,
-            receiver: invoiceData['receiver'] as String?,
+          // Navigate to full Lightning payment screen instead of dialog
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => LightningPaymentScreen(
+                invoice: inv,
+                paymentHash: (invoiceData['paymentHash'] ?? '') as String,
+                amountSats: amountSats,
+                totalBrl: totalBrl,
+                orderId: order.id,
+                receiver: invoiceData['receiver'] as String?,
+              ),
+            ),
           );
         } else {
           debugPrint('❌ Erro ao criar invoice');
@@ -709,7 +721,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     debugPrint('🔄 PaymentScreen build - _isProcessing: $_isProcessing');
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Novo Pagamento'),
+        title: const Text('Pagar Conta'),
         actions: [
           // Botão de debug para resetar estado
           if (_isProcessing)
@@ -819,11 +831,120 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 : const Icon(Icons.search),
             label: const Text('Processar Código'),
           ),
+          
+          // Instruções de como funciona
+          if (_billData == null) ...[
+            const SizedBox(height: 24),
+            _buildInstructionsCard(),
+          ],
+          
           const SizedBox(height: 24),
           if (_billData != null) ..._buildBillInfo(),
           if (_conversionData != null) ..._buildConversionInfo(),
+          
+          // Extra space for navigation
+          const SizedBox(height: 80),
         ],
       ),
+    );
+  }
+  
+  Widget _buildInstructionsCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0x33FF6B6B)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.help_outline, color: Color(0xFFFF6B6B), size: 24),
+              SizedBox(width: 8),
+              Text(
+                'Como funciona?',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _buildInstructionStep('1', 'Cole o código PIX ou boleto acima'),
+          const SizedBox(height: 12),
+          _buildInstructionStep('2', 'Confira o valor e as taxas'),
+          const SizedBox(height: 12),
+          _buildInstructionStep('3', 'Pague em Bitcoin via Lightning'),
+          const SizedBox(height: 12),
+          _buildInstructionStep('4', 'Um Bro aceita sua ordem e paga a conta'),
+          const SizedBox(height: 12),
+          _buildInstructionStep('5', 'Pronto! Conta paga com Bitcoin 🎉'),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0x1A3DE98C),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.security, color: Color(0xFF3DE98C), size: 20),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Seu pagamento fica em custódia até o Bro confirmar que pagou sua conta.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF3DE98C),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildInstructionStep(String number, String text) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFF6B6B),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Center(
+            child: Text(
+              number,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              color: Color(0xB3FFFFFF),
+              fontSize: 14,
+            ),
+          ),
+        ),
+      ],
     );
   }
 

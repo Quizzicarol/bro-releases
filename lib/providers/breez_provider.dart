@@ -83,15 +83,24 @@ class BreezProvider with ChangeNotifier {
       }
 
       // Generate or use provided mnemonic
-      if (mnemonic == null) {
-        _mnemonic = bip39.generateMnemonic();
-        // Salvar seed no storage
-        await StorageService().saveBreezMnemonic(_mnemonic!);
-        debugPrint('?? Nova carteira gerada!');
-        // N�o mostrar seed aqui, ser� mostrado na UI apenas na primeira vez
-      } else {
+      // IMPORTANTE: Primeiro tentar carregar seed salva, depois gerar nova
+      if (mnemonic != null) {
+        // Seed fornecida explicitamente (recuperação)
         _mnemonic = mnemonic;
-        debugPrint('?? Restaurando carteira com seed fornecida');
+        await StorageService().saveBreezMnemonic(_mnemonic!);
+        debugPrint('🔑 Restaurando carteira com seed fornecida');
+      } else {
+        // Tentar carregar seed salva
+        final savedMnemonic = await StorageService().getBreezMnemonic();
+        if (savedMnemonic != null && savedMnemonic.isNotEmpty) {
+          _mnemonic = savedMnemonic;
+          debugPrint('🔑 Usando seed salva anteriormente');
+        } else {
+          // Gerar nova seed apenas se não houver salva
+          _mnemonic = bip39.generateMnemonic();
+          await StorageService().saveBreezMnemonic(_mnemonic!);
+          debugPrint('🆕 Nova carteira gerada!');
+        }
       }
 
       // Create seed from mnemonic
@@ -243,7 +252,7 @@ class BreezProvider with ChangeNotifier {
       );
 
       final bolt11 = resp.paymentRequest;
-      debugPrint('? Invoice BOLT11 criado: ${bolt11.substring(0, 50)}...');
+      debugPrint('✅ Invoice BOLT11 criado: ${bolt11.substring(0, 50)}...');
 
       // Try to parse to extract payment hash for tracking
       String? paymentHash;
@@ -251,15 +260,16 @@ class BreezProvider with ChangeNotifier {
         final parsed = await _sdk!.parse(input: bolt11);
         if (parsed is spark.InputType_Bolt11Invoice) {
           paymentHash = parsed.field0.paymentHash;
-          debugPrint('?? Payment Hash: $paymentHash');
+          debugPrint('🔑 Payment Hash: $paymentHash');
         }
       } catch (e) {
-        debugPrint('?? Erro ao extrair payment hash: $e');
+        debugPrint('⚠️ Erro ao extrair payment hash: $e');
       }
 
       return {
         'success': true,
-        'invoice': bolt11,
+        'bolt11': bolt11,  // Chave esperada pelo wallet_screen
+        'invoice': bolt11, // Alias para compatibilidade
         'paymentHash': paymentHash,
         'receiver': 'Breez Spark Wallet',
       };
@@ -399,15 +409,49 @@ class BreezProvider with ChangeNotifier {
   /// Pay a Lightning invoice (BOLT11)
   Future<Map<String, dynamic>?> payInvoice(String bolt11) async {
     if (!_isInitialized || _sdk == null) {
-      return {'success': false, 'error': 'SDK n�o inicializado'};
+      return {'success': false, 'error': 'SDK não inicializado'};
     }
 
     _setLoading(true);
     _setError(null);
     
-    debugPrint('? Pagando invoice...');
+    debugPrint('💸 Pagando invoice...');
 
     try {
+      // Primeiro, decodificar invoice para ver o valor
+      int? invoiceAmount;
+      try {
+        final parsed = await _sdk!.parse(input: bolt11);
+        if (parsed is spark.InputType_Bolt11Invoice) {
+          // amountMsat é BigInt? e em milisat, converter para sats
+          final amountMsat = parsed.field0.amountMsat;
+          if (amountMsat != null) {
+            invoiceAmount = (amountMsat ~/ BigInt.from(1000)).toInt();
+          }
+          debugPrint('📋 Valor da invoice: $invoiceAmount sats');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Não foi possível decodificar invoice: $e');
+      }
+
+      // Verificar saldo antes de enviar
+      final balanceInfo = await getBalance();
+      final currentBalance = int.tryParse(balanceInfo?['balance']?.toString() ?? '0') ?? 0;
+      debugPrint('💰 Saldo atual: $currentBalance sats');
+
+      if (invoiceAmount != null && currentBalance < invoiceAmount) {
+        final errorMsg = 'Saldo insuficiente. Você tem $currentBalance sats mas a invoice requer $invoiceAmount sats';
+        _setError(errorMsg);
+        debugPrint('❌ $errorMsg');
+        return {
+          'success': false, 
+          'error': errorMsg,
+          'errorType': 'INSUFFICIENT_FUNDS',
+          'balance': currentBalance,
+          'required': invoiceAmount,
+        };
+      }
+
       // Step 1: Prepare payment
       final prepareReq = spark.PrepareSendPaymentRequest(
         paymentRequest: bolt11,
@@ -425,7 +469,7 @@ class BreezProvider with ChangeNotifier {
 
       final resp = await _sdk!.sendPayment(request: sendReq);
 
-      debugPrint('? Pagamento enviado!');
+      debugPrint('✅ Pagamento enviado!');
       debugPrint('   Payment ID: ${resp.payment.id}');
       debugPrint('   Amount: ${resp.payment.amount} sats');
       debugPrint('   Status: ${resp.payment.status}');
@@ -445,9 +489,22 @@ class BreezProvider with ChangeNotifier {
         },
       };
     } catch (e) {
-      final errMsg = 'Erro ao pagar invoice: $e';
+      String errMsg = e.toString();
+      
+      // Detectar erros comuns e traduzir
+      if (errMsg.contains('insufficient') || errMsg.contains('Insufficient') || 
+          errMsg.contains('balance') || errMsg.contains('Balance')) {
+        errMsg = 'Saldo insuficiente para este pagamento';
+      } else if (errMsg.contains('timeout') || errMsg.contains('Timeout')) {
+        errMsg = 'Tempo esgotado. Tente novamente.';
+      } else if (errMsg.contains('route') || errMsg.contains('Route')) {
+        errMsg = 'Não foi possível encontrar rota para pagamento';
+      } else if (errMsg.contains('expired') || errMsg.contains('Expired')) {
+        errMsg = 'Invoice expirada. Solicite uma nova.';
+      }
+      
       _setError(errMsg);
-      debugPrint('? $errMsg');
+      debugPrint('❌ Erro ao pagar: $errMsg');
       return {'success': false, 'error': errMsg};
     } finally {
       _setLoading(false);
@@ -554,6 +611,18 @@ class BreezProvider with ChangeNotifier {
     return {'received': false, 'amount': 0};
   }
 
+  /// Reinicializar SDK com nova seed (usado após restauração de backup)
+  /// Isso desconecta o SDK atual e reconecta com a nova seed
+  Future<bool> reinitializeWithNewSeed(String mnemonic) async {
+    debugPrint('🔄 Reinicializando SDK com nova seed...');
+    
+    // Desconectar SDK atual
+    await disconnect();
+    
+    // Reinicializar com a nova seed
+    return await initialize(mnemonic: mnemonic);
+  }
+
   /// Disconnect SDK
   Future<void> disconnect() async {
     if (_sdk != null) {
@@ -562,8 +631,9 @@ class BreezProvider with ChangeNotifier {
       await _sdk!.disconnect();
       _sdk = null;
       _isInitialized = false;
+      _mnemonic = null;
       notifyListeners();
-      debugPrint('?? Breez SDK desconectado');
+      debugPrint('🔌 Breez SDK desconectado');
     }
   }
 

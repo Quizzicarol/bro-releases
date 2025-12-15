@@ -1,7 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/storage_service.dart';
-import '../services/nip06_service.dart';
 
 class NostrProfileScreen extends StatefulWidget {
   const NostrProfileScreen({Key? key}) : super(key: key);
@@ -12,7 +11,6 @@ class NostrProfileScreen extends StatefulWidget {
 
 class _NostrProfileScreenState extends State<NostrProfileScreen> {
   final _storage = StorageService();
-  final _nip06 = Nip06Service();
   
   String? _publicKey;
   String? _privateKey;
@@ -36,9 +34,7 @@ class _NostrProfileScreenState extends State<NostrProfileScreen> {
       _publicKey = publicKey;
       _privateKey = privateKey;
       _npub = publicKey != null ? _toNpub(publicKey) : null;
-      _lightningAddress = publicKey != null 
-          ? '${publicKey.substring(0, 8)}@bro.app'
-          : null;
+      _lightningAddress = null; // Removido - será implementado no futuro
       _isLoading = false;
     });
     
@@ -168,17 +164,6 @@ class _NostrProfileScreenState extends State<NostrProfileScreen> {
                     color: const Color(0xFF9C27B0),
                     onCopy: () => _copyToClipboard(_publicKey ?? '', 'npub'),
                     onQR: () => _showQRCode(_npub ?? '', 'Meu npub'),
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // Lightning Address
-                  _buildKeyCard(
-                    title: 'Lightning Address',
-                    value: _lightningAddress ?? '',
-                    icon: Icons.bolt,
-                    color: const Color(0xFFFF6B6B),
-                    onCopy: () => _copyToClipboard(_lightningAddress ?? '', 'Lightning Address'),
-                    onQR: () => _showQRCode('lightning:$_lightningAddress', 'Lightning Address'),
                   ),
                   const SizedBox(height: 24),
                   

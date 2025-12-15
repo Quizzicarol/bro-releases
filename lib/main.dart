@@ -18,6 +18,7 @@ import 'screens/relay_management_screen.dart';
 import 'screens/nostr_profile_screen.dart';
 import 'screens/nip06_backup_screen.dart';
 import 'screens/privacy_settings_screen.dart';
+import 'screens/wallet_screen.dart';
 import 'providers/breez_provider_export.dart';
 import 'providers/order_provider.dart';
 import 'providers/collateral_provider.dart';
@@ -27,9 +28,7 @@ import 'services/storage_service.dart';
 import 'services/notification_service.dart';
 import 'services/api_service.dart';
 import 'services/cache_service.dart';
-import 'services/haptic_service.dart';
 import 'providers/theme_provider.dart';
-import 'theme/bro_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -191,6 +190,7 @@ class BroApp extends StatelessWidget {
               '/nostr-profile': (context) => const NostrProfileScreen(),
               '/nip06-backup': (context) => const Nip06BackupScreen(),
               '/privacy-settings': (context) => const PrivacySettingsScreen(),
+              '/wallet': (context) => const WalletScreen(),
               '/provider-education': (context) => const ProviderEducationScreen(),
               '/provider-collateral': (context) => const ProviderCollateralScreen(providerId: 'temp'),
               '/provider-order-detail': (context) => const ProviderOrderDetailScreen(orderId: 'temp', providerId: 'temp'),
