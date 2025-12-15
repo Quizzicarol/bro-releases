@@ -224,23 +224,36 @@ class ApiService {
 
   Future<Map<String, dynamic>?> validateBoleto(String code) async {
     try {
+      print('🔍 validateBoleto chamado com código: ${code.length} dígitos');
+      print('🔍 Código (primeiros 20 chars): ${code.substring(0, code.length > 20 ? 20 : code.length)}...');
+      
       // Usar decodificador local sempre (funciona com ou sem backend)
       final result = BoletoDecoderService.decodeBoleto(code);
+      
       if (result != null) {
         print('✅ Boleto decodificado localmente: ${result['merchantName']}, R\$ ${result['value']}');
         return result;
       }
       
+      print('⚠️ Decodificador local retornou null');
+      
       // Se decodificação local falhar e não estiver em test mode, tenta backend
       if (!AppConfig.testMode) {
+        print('📡 Tentando backend...');
         return await post('/api/validate-boleto', {'code': code});
       }
       
-      print('❌ Não foi possível decodificar o boleto');
-      return null;
+      print('❌ Não foi possível decodificar o boleto (test mode, sem backend)');
+      return {
+        'success': false,
+        'error': 'Código de boleto inválido. Deve ter 44, 47 ou 48 dígitos.',
+      };
     } catch (e) {
       print('❌ Erro ao validar boleto: $e');
-      return null;
+      return {
+        'success': false,
+        'error': 'Erro ao processar boleto: $e',
+      };
     }
   }
 
@@ -653,20 +666,14 @@ class ApiService {
       };
     }
 
-    // Boleto validate
+    // Boleto validate - NÃO usar mock, sempre decodificar localmente
     if (path.contains('/api/validate-boleto')) {
       final boletoCode = data?['code'] ?? '';
-      final codeLength = boletoCode.toString().length;
-      print('🔍 Mock: Validando Boleto: ${boletoCode.toString().substring(0, min<int>(20, codeLength))}');
+      print('⚠️ Mock de boleto chamado - decodificação local falhou para: $boletoCode');
+      // Retornar erro para forçar uso do decodificador local
       return {
-        'success': true,
-        'billType': 'boleto',
-        'type': 'boleto',
-        'value': 250.50,
-        'merchantName': 'Banco Teste S.A.',
-        'dueDate': DateTime.now().add(const Duration(days: 5)).toIso8601String(),
-        'barcode': boletoCode,
-        'message': 'Boleto validado com sucesso (mock)',
+        'success': false,
+        'error': 'Decodificação local falhou - código inválido',
       };
     }
 

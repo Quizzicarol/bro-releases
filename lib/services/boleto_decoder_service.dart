@@ -8,23 +8,34 @@ class BoletoDecoderService {
     // Limpar código - remover espaços, pontos e hífens
     final cleanCode = code.replaceAll(RegExp(r'[^\d]'), '');
     
-    if (cleanCode.isEmpty) return null;
+    print('🔍 BoletoDecoderService.decodeBoleto()');
+    print('🔍 Código original: ${code.length} chars');
+    print('🔍 Código limpo: ${cleanCode.length} dígitos');
+    
+    if (cleanCode.isEmpty) {
+      print('❌ Código vazio após limpeza');
+      return null;
+    }
     
     // Boleto bancário tradicional: 47 dígitos
     if (cleanCode.length == 47) {
+      print('✅ Detectado boleto bancário (47 dígitos)');
       return _decodeBoletoTradicional(cleanCode);
     }
     
     // Boleto de concessionária/convênio: 48 dígitos
     if (cleanCode.length == 48) {
+      print('✅ Detectado boleto convênio (48 dígitos)');
       return _decodeBoletoConvenio(cleanCode);
     }
     
     // Código de barras direto: 44 dígitos
     if (cleanCode.length == 44) {
+      print('✅ Detectado código de barras (44 dígitos)');
       return _decodeCodigoBarras(cleanCode);
     }
     
+    print('❌ Tamanho inválido: ${cleanCode.length} dígitos (esperado: 44, 47 ou 48)');
     return null;
   }
   
