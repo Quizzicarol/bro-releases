@@ -1,23 +1,29 @@
 ﻿/// Configuracao centralizada do Bro App
 /// 
-/// CHECKLIST PARA PRODUCAO:
-/// [ ] testMode = false
-/// [ ] providerTestMode = false
-/// [ ] defaultBackendUrl = URL do backend de producao
-/// [ ] Verificar breezApiKey esta correto
+/// ⚠️ CHECKLIST PARA PRODUÇÃO:
+/// [x] testMode = false
+/// [x] providerTestMode = false  
+/// [ ] defaultBackendUrl = URL do backend de produção
+/// [ ] Verificar breezApiKey está correto
+/// [ ] Remover logs de debug sensíveis
 /// 
 class AppConfig {
   // ============================================
-  // MODO DE DESENVOLVIMENTO (ALTERAR PARA DEPLOY)
+  // MODO DE DESENVOLVIMENTO
+  // ============================================
+  // ⚠️ SEGURANÇA: Em produção, ambos DEVEM ser FALSE!
+  //
+  // Para desenvolvimento local, crie um arquivo config_dev.dart
+  // e faça override dessas constantes
   // ============================================
   
   /// Modo de teste - usa dados mockados, sem backend real
-  /// PRODUCAO: Mude para FALSE
-  static const bool testMode = true;
+  /// ⚠️ PRODUÇÃO: DEVE SER FALSE
+  static const bool testMode = false;
   
   /// Permite provedores sem garantia depositada
-  /// PRODUCAO: Mude para FALSE
-  static const bool providerTestMode = true;
+  /// ⚠️ PRODUÇÃO: DEVE SER FALSE
+  static const bool providerTestMode = false;
 
   // ============================================
   // BACKEND API

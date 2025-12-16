@@ -56,12 +56,12 @@ class PlatformWalletService {
       
       if (mnemonic != null && mnemonic.isNotEmpty) {
         _mnemonic = mnemonic;
-        debugPrint('🔑 Usando mnemonic fornecido');
+        debugPrint('🔑 Usando mnemonic existente');
       } else {
         _mnemonic = bip39.generateMnemonic();
-        debugPrint('🆕 NOVA CARTEIRA MASTER GERADA!');
-        debugPrint('⚠️ GUARDE ESTE MNEMONIC COM SEGURANÇA:');
-        debugPrint('📝 $_mnemonic');
+        debugPrint('🆕 Nova carteira master gerada');
+        // SEGURANÇA: NUNCA imprimir mnemonic em logs!
+        // O mnemonic deve ser mostrado apenas na UI para backup
       }
       
       final seed = spark.Seed.mnemonic(mnemonic: _mnemonic!);

@@ -1,5 +1,7 @@
 ﻿import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../config.dart';
 
 class StorageService {
@@ -8,32 +10,82 @@ class StorageService {
   StorageService._internal();
 
   SharedPreferences? _prefs;
+  
+  // Armazenamento seguro para dados sensíveis
+  static const _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+    ),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock,
+    ),
+  );
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
+    // Migrar dados antigos para armazenamento seguro
+    await _migrateToSecureStorage();
+  }
+  
+  // Migrar dados de SharedPreferences para SecureStorage
+  Future<void> _migrateToSecureStorage() async {
+    try {
+      // Verificar se já migrou
+      final migrated = _prefs?.getBool('_migrated_to_secure_v1') ?? false;
+      if (migrated) return;
+      
+      // Migrar chaves Nostr
+      final oldPrivKey = _prefs?.getString('nostr_private_key');
+      final oldPubKey = _prefs?.getString('nostr_public_key');
+      if (oldPrivKey != null && oldPrivKey.isNotEmpty) {
+        await _secureStorage.write(key: 'nostr_private_key', value: oldPrivKey);
+        await _prefs?.remove('nostr_private_key');
+        debugPrint('🔄 Chave privada Nostr migrada para armazenamento seguro');
+      }
+      if (oldPubKey != null && oldPubKey.isNotEmpty) {
+        await _secureStorage.write(key: 'nostr_public_key', value: oldPubKey);
+        await _prefs?.remove('nostr_public_key');
+        debugPrint('🔄 Chave pública Nostr migrada para armazenamento seguro');
+      }
+      
+      // Migrar mnemonic Breez
+      final oldMnemonic = _prefs?.getString('breez_mnemonic');
+      if (oldMnemonic != null && oldMnemonic.isNotEmpty) {
+        await _secureStorage.write(key: 'breez_mnemonic', value: oldMnemonic);
+        await _prefs?.remove('breez_mnemonic');
+        debugPrint('🔄 Mnemonic Breez migrado para armazenamento seguro');
+      }
+      
+      // Marcar como migrado
+      await _prefs?.setBool('_migrated_to_secure_v1', true);
+      debugPrint('✅ Migração para armazenamento seguro concluída');
+    } catch (e) {
+      debugPrint('⚠️ Erro na migração: $e');
+    }
   }
 
-  // ===== NOSTR KEYS =====
-  // (usando SharedPreferences - para produÃ§Ã£o, usar flutter_secure_storage)
+  // ===== NOSTR KEYS (ARMAZENAMENTO SEGURO) =====
   
   Future<void> saveNostrKeys({
     required String privateKey,
     required String publicKey,
   }) async {
     if (_prefs == null) await init();
-    await _prefs?.setString('nostr_private_key', privateKey);
-    await _prefs?.setString('nostr_public_key', publicKey);
+    // Salvar em armazenamento seguro
+    await _secureStorage.write(key: 'nostr_private_key', value: privateKey);
+    await _secureStorage.write(key: 'nostr_public_key', value: publicKey);
     await _prefs?.setBool('is_logged_in', true);
+    debugPrint('🔐 Chaves Nostr salvas com segurança');
   }
 
   Future<String?> getNostrPrivateKey() async {
     if (_prefs == null) await init();
-    return _prefs?.getString('nostr_private_key');
+    return await _secureStorage.read(key: 'nostr_private_key');
   }
 
   Future<String?> getNostrPublicKey() async {
     if (_prefs == null) await init();
-    return _prefs?.getString('nostr_public_key');
+    return await _secureStorage.read(key: 'nostr_public_key');
   }
 
   Future<bool> isLoggedIn() async {
@@ -41,18 +93,17 @@ class StorageService {
     return _prefs?.getBool('is_logged_in') ?? false;
   }
 
-  // ===== BREEZ - API Key REMOVIDA =====
-  // A API key do Breez agora estÃ¡ no backend, NÃƒO no frontend
-  // Mantido apenas mnemonic para compatibilidade com cÃ³digo legacy
+  // ===== BREEZ MNEMONIC (ARMAZENAMENTO SEGURO) =====
   
   Future<void> saveBreezMnemonic(String mnemonic) async {
     if (_prefs == null) await init();
-    await _prefs?.setString('breez_mnemonic', mnemonic);
+    await _secureStorage.write(key: 'breez_mnemonic', value: mnemonic);
+    debugPrint('🔐 Mnemonic Breez salvo com segurança');
   }
 
   Future<String?> getBreezMnemonic() async {
     if (_prefs == null) await init();
-    return _prefs?.getString('breez_mnemonic');
+    return await _secureStorage.read(key: 'breez_mnemonic');
   }
 
   Future<void> setFirstTimeSeedShown(bool shown) async {
@@ -273,5 +324,28 @@ class StorageService {
     await _prefs?.remove('nostr_profile_display_name');
     await _prefs?.remove('nostr_profile_picture');
     await _prefs?.remove('nostr_profile_about');
+  }
+  
+  // ===== LOGOUT / LIMPAR DADOS SENSÍVEIS =====
+  
+  Future<void> clearAllSecureData() async {
+    try {
+      // Limpar armazenamento seguro
+      await _secureStorage.delete(key: 'nostr_private_key');
+      await _secureStorage.delete(key: 'nostr_public_key');
+      await _secureStorage.delete(key: 'breez_mnemonic');
+      
+      // Limpar flags de login
+      if (_prefs == null) await init();
+      await _prefs?.setBool('is_logged_in', false);
+      await _prefs?.setBool('first_time_seed_shown', false);
+      
+      // Limpar perfil
+      await clearNostrProfile();
+      
+      debugPrint('🗑️ Todos os dados sensíveis foram removidos com segurança');
+    } catch (e) {
+      debugPrint('❌ Erro ao limpar dados sensíveis: $e');
+    }
   }
 }
