@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert';
 import 'platform_wallet_service.dart';
 import 'platform_fee_service.dart';
@@ -17,6 +18,12 @@ import 'platform_fee_service.dart';
 class EscrowSplitService {
   static const String _pendingEscrowsKey = 'pending_escrows';
   static const String _completedEscrowsKey = 'completed_escrows';
+  
+  // Armazenamento seguro para mnemonic
+  static const _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
   
   static final EscrowSplitService _instance = EscrowSplitService._();
   static EscrowSplitService get instance => _instance;
@@ -305,19 +312,31 @@ class EscrowSplitService {
     return _getPendingEscrows();
   }
 
-  // === Platform Mnemonic Storage ===
+  // === Platform Mnemonic Storage (ARMAZENAMENTO SEGURO) ===
   
   static const String _platformMnemonicKey = 'platform_wallet_mnemonic';
   
   Future<String?> _getSavedPlatformMnemonic() async {
+    // Primeiro tentar armazenamento seguro
+    final secureMnemonic = await _secureStorage.read(key: _platformMnemonicKey);
+    if (secureMnemonic != null) return secureMnemonic;
+    
+    // Fallback: migrar de SharedPreferences
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_platformMnemonicKey);
+    final oldMnemonic = prefs.getString(_platformMnemonicKey);
+    if (oldMnemonic != null && oldMnemonic.isNotEmpty) {
+      // Migrar para armazenamento seguro
+      await _secureStorage.write(key: _platformMnemonicKey, value: oldMnemonic);
+      await prefs.remove(_platformMnemonicKey);
+      debugPrint('🔄 Mnemonic da plataforma migrado para armazenamento seguro');
+      return oldMnemonic;
+    }
+    return null;
   }
   
   Future<void> _savePlatformMnemonic(String mnemonic) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_platformMnemonicKey, mnemonic);
-    debugPrint('🔐 Mnemonic da carteira master salvo');
+    await _secureStorage.write(key: _platformMnemonicKey, value: mnemonic);
+    debugPrint('🔐 Mnemonic da carteira master salvo com segurança');
   }
   
   /// Exporta o mnemonic da carteira master (para backup seguro)

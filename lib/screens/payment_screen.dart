@@ -189,6 +189,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       final breezProvider = context.read<BreezProvider>();
 
       bool isPaid = false;
+      bool isProcessingPayment = false; // Lock para evitar processamento duplicado
       bool dialogClosed = false; // Flag para saber se dialog foi fechado
       StreamSubscription<spark.SdkEvent>? eventSub;
       
@@ -197,13 +198,16 @@ class _PaymentScreenState extends State<PaymentScreen> {
       eventSub = breezProvider.sdk?.addEventListener().listen((event) {
         debugPrint('📡 Evento recebido: ${event.runtimeType}');
         
-        // IMPORTANTE: Não processar se dialog já foi fechado
-        if (dialogClosed) {
-          debugPrint('⚠️ Dialog já fechado, ignorando evento');
+        // IMPORTANTE: Não processar se dialog já foi fechado ou já processando
+        if (dialogClosed || isProcessingPayment) {
+          debugPrint('⚠️ Dialog fechado ou já processando, ignorando evento');
           return;
         }
         
         if (event is spark.SdkEvent_PaymentSucceeded && !isPaid) {
+          // Marcar como processando ANTES de qualquer operação
+          isProcessingPayment = true;
+          
           final payment = event.payment;
           debugPrint('✅ PaymentSucceeded recebido! Payment ID: ${payment.id}');
           

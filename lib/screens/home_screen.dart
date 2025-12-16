@@ -83,7 +83,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _startPricePolling() {
     _priceUpdateTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      _fetchBitcoinPrice();
+      if (mounted) {
+        _fetchBitcoinPrice();
+      }
     });
   }
 

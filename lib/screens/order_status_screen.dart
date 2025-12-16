@@ -6,6 +6,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/order_service.dart';
 import '../services/dispute_service.dart';
 import '../services/lnaddress_service.dart';
+import '../services/withdrawal_service.dart';
+import '../models/withdrawal.dart';
 import '../providers/breez_provider_export.dart';
 import '../providers/order_provider.dart';
 import '../providers/provider_balance_provider.dart';
@@ -56,6 +58,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
   @override
   void dispose() {
     _statusCheckTimer?.cancel();
+    _paymentCheckTimer?.cancel();
     super.dispose();
   }
 
@@ -614,6 +617,14 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                           return;
                         }
                         
+                        // Determinar tipo de destino
+                        String destType = 'invoice';
+                        if (LnAddressService.isLnurl(destination)) {
+                          destType = 'lnurl';
+                        } else if (LnAddressService.isLightningAddress(destination)) {
+                          destType = 'lnaddress';
+                        }
+                        
                         // Enviar pagamento
                         setModalState(() {
                           isSending = true;
@@ -625,23 +636,62 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                           final result = await breezProvider.payInvoice(invoiceToSend);
                           
                           if (result != null && result['success'] == true) {
+                            // Registrar saque bem-sucedido
+                            final withdrawalService = WithdrawalService();
+                            await withdrawalService.saveWithdrawal(
+                              orderId: widget.orderId,
+                              amountSats: amount,
+                              destination: destination,
+                              destinationType: destType,
+                              status: 'success',
+                              txId: result['paymentHash'] ?? result['txId'],
+                              userPubkey: widget.userId ?? 'anonymous',
+                            );
+                            
                             if (context.mounted) {
                               Navigator.pop(context); // Fechar modal
                               ScaffoldMessenger.of(this.context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('✅ Saque enviado com sucesso!'),
+                                SnackBar(
+                                  content: Text('✅ Saque de $amount sats enviado com sucesso!'),
                                   backgroundColor: Colors.green,
                                 ),
                               );
+                              // Recarregar a tela para mostrar o saque registrado
+                              setState(() {});
                             }
                           } else {
                             final errMsg = result?['error'] ?? 'Falha ao enviar pagamento';
+                            
+                            // Registrar saque que falhou
+                            final withdrawalService = WithdrawalService();
+                            await withdrawalService.saveWithdrawal(
+                              orderId: widget.orderId,
+                              amountSats: amount,
+                              destination: destination,
+                              destinationType: destType,
+                              status: 'failed',
+                              error: errMsg,
+                              userPubkey: widget.userId ?? 'anonymous',
+                            );
+                            
                             setModalState(() {
                               isSending = false;
                               errorMessage = errMsg;
                             });
                           }
                         } catch (e) {
+                          // Registrar erro
+                          final withdrawalService = WithdrawalService();
+                          await withdrawalService.saveWithdrawal(
+                            orderId: widget.orderId,
+                            amountSats: amount,
+                            destination: destination,
+                            destinationType: destType,
+                            status: 'failed',
+                            error: e.toString(),
+                            userPubkey: widget.userId ?? 'anonymous',
+                          );
+                          
                           setModalState(() {
                             isSending = false;
                             errorMessage = 'Erro: $e';
@@ -2806,7 +2856,107 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
             ),
           ),
         ),
+        const SizedBox(height: 16),
+        // Histórico de saques desta ordem
+        _buildWithdrawalHistory(),
       ],
+    );
+  }
+  
+  Widget _buildWithdrawalHistory() {
+    return FutureBuilder<List<Withdrawal>>(
+      future: WithdrawalService().getWithdrawalsByOrder(
+        orderId: widget.orderId,
+        userPubkey: widget.userId ?? 'anonymous',
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SizedBox.shrink();
+        }
+        
+        final withdrawals = snapshot.data ?? [];
+        if (withdrawals.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Histórico de Saques desta Ordem',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 12),
+            ...withdrawals.map((w) => _buildWithdrawalItem(w)).toList(),
+          ],
+        );
+      },
+    );
+  }
+  
+  Widget _buildWithdrawalItem(Withdrawal withdrawal) {
+    final isSuccess = withdrawal.status == 'success';
+    final statusColor = isSuccess ? Colors.green : Colors.red;
+    final statusIcon = isSuccess ? Icons.check_circle : Icons.error;
+    
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: statusColor.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: statusColor.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(statusIcon, color: statusColor, size: 24),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${withdrawal.amountSats} sats - ${withdrawal.statusText}',
+                  style: TextStyle(
+                    color: statusColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Destino: ${withdrawal.destinationShort}',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.7),
+                    fontSize: 12,
+                  ),
+                ),
+                Text(
+                  _formatDateTime(withdrawal.createdAt.toIso8601String()),
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.5),
+                    fontSize: 11,
+                  ),
+                ),
+                if (withdrawal.error != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Erro: ${withdrawal.error}',
+                    style: const TextStyle(
+                      color: Colors.red,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
