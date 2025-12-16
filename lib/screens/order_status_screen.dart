@@ -526,6 +526,11 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                 const SizedBox(height: 16),
                 _buildDisputedCard(),
               ],
+              // Botão de saque para ordens canceladas
+              if (_currentStatus == 'cancelled') ...[
+                const SizedBox(height: 16),
+                _buildWithdrawSatsButton(),
+              ],
             ],
           ),
         ),
@@ -2261,6 +2266,52 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
           padding: const EdgeInsets.symmetric(vertical: 16),
         ),
       ),
+    );
+  }
+
+  Widget _buildWithdrawSatsButton() {
+    return Column(
+      children: [
+        // Info card
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.blue.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.blue.withOpacity(0.3)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.info_outline, color: Colors.blue, size: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Seus ${widget.amountSats} sats ainda estão na sua carteira. Você pode sacar para outra carteira Lightning.',
+                  style: const TextStyle(
+                    color: Colors.blue,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        // Botão de saque
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: () => _showWithdrawInstructions(),
+            icon: const Icon(Icons.send),
+            label: const Text('Sacar Sats'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
