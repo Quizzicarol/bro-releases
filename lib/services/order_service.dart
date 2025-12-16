@@ -55,8 +55,29 @@ class OrderService {
       // Em modo teste, buscar do cache local
       if (AppConfig.testMode) {
         final prefs = await SharedPreferences.getInstance();
-        final ordersJson = prefs.getString('saved_orders');
         
+        // Buscar em todas as chaves de ordens (orders_*)
+        final allKeys = prefs.getKeys();
+        for (final key in allKeys) {
+          if (key.startsWith('orders_')) {
+            final ordersJson = prefs.getString(key);
+            if (ordersJson != null) {
+              final List<dynamic> ordersList = json.decode(ordersJson);
+              final order = ordersList.firstWhere(
+                (o) => o['id'] == orderId,
+                orElse: () => null,
+              );
+              
+              if (order != null) {
+                debugPrint('✅ Ordem encontrada no cache ($key): $orderId');
+                return Map<String, dynamic>.from(order);
+              }
+            }
+          }
+        }
+        
+        // Fallback: tentar chave antiga 'saved_orders'
+        final ordersJson = prefs.getString('saved_orders');
         if (ordersJson != null) {
           final List<dynamic> ordersList = json.decode(ordersJson);
           final order = ordersList.firstWhere(
@@ -65,7 +86,7 @@ class OrderService {
           );
           
           if (order != null) {
-            debugPrint('✅ Ordem encontrada no cache: $orderId');
+            debugPrint('✅ Ordem encontrada no cache (legacy): $orderId');
             return Map<String, dynamic>.from(order);
           }
         }
