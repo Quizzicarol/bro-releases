@@ -518,19 +518,20 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
                         resolveError = null;
                       });
                       
-                      // Verificar se é um Lightning Address
-                      if (LnAddressService.isLightningAddress(input)) {
-                        // Precisa ter valor para LN Address
+                      // Verificar se é um Lightning Address ou LNURL
+                      if (LnAddressService.isLightningAddress(input) || 
+                          LnAddressService.isLnurl(input)) {
+                        // Precisa ter valor para LN Address/LNURL
                         if (amountSats == null || amountSats <= 0) {
                           setModalState(() {
-                            resolveError = 'Para Lightning Address, o valor precisa ser conhecido';
+                            resolveError = 'Para Lightning Address/LNURL, o valor precisa ser conhecido';
                           });
                           return;
                         }
                         
                         setModalState(() => isResolvingLnAddress = true);
                         
-                        // Resolver LN Address para invoice
+                        // Resolver LN Address/LNURL para invoice
                         final lnService = LnAddressService();
                         final result = await lnService.getInvoice(
                           lnAddress: input,
@@ -541,7 +542,7 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
                         if (result['success'] != true) {
                           setModalState(() {
                             isResolvingLnAddress = false;
-                            resolveError = result['error'] ?? 'Erro ao resolver Lightning Address';
+                            resolveError = result['error'] ?? 'Erro ao resolver destino';
                           });
                           return;
                         }
@@ -559,7 +560,7 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
                       if (!input.toLowerCase().startsWith('lnbc') && 
                           !input.toLowerCase().startsWith('lntb')) {
                         setModalState(() {
-                          resolveError = 'Invoice inválida. Use lnbc... ou user@wallet.com';
+                          resolveError = 'Destino inválido. Use invoice (lnbc...), LNURL ou user@wallet.com';
                         });
                         return;
                       }

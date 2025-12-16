@@ -496,8 +496,9 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                         
                         String invoiceToSend = destination;
                         
-                        // Verificar se é Lightning Address
-                        if (LnAddressService.isLightningAddress(destination)) {
+                        // Verificar se é Lightning Address ou LNURL
+                        if (LnAddressService.isLightningAddress(destination) || 
+                            LnAddressService.isLnurl(destination)) {
                           setModalState(() => isResolvingLnAddress = true);
                           
                           final lnService = LnAddressService();
@@ -510,7 +511,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                           if (result['success'] != true) {
                             setModalState(() {
                               isResolvingLnAddress = false;
-                              errorMessage = result['error'] ?? 'Erro ao resolver Lightning Address';
+                              errorMessage = result['error'] ?? 'Erro ao resolver destino';
                             });
                             return;
                           }
@@ -519,7 +520,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                           setModalState(() => isResolvingLnAddress = false);
                         } else if (!destination.toLowerCase().startsWith('lnbc') && 
                                    !destination.toLowerCase().startsWith('lntb')) {
-                          setModalState(() => errorMessage = 'Destino inválido. Use lnbc... ou user@wallet.com');
+                          setModalState(() => errorMessage = 'Destino inválido. Use invoice (lnbc...), LNURL ou user@wallet.com');
                           return;
                         }
                         
