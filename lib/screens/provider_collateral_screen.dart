@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import '../providers/collateral_provider.dart';
 import '../providers/breez_provider_export.dart';
 import '../models/collateral_tier.dart';
-import '../config.dart';
 
-/// Tela para provedor depositar garantia em Bitcoin
+/// Tela para provedor configurar garantia local em Bitcoin
+/// Os fundos ficam na carteira do provedor (não são enviados para escrow)
 class ProviderCollateralScreen extends StatefulWidget {
   final String providerId;
 
@@ -26,10 +24,28 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final collateralProvider = context.read<CollateralProvider>();
-      collateralProvider.initialize(widget.providerId);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _loadData();
     });
+  }
+  
+  Future<void> _loadData() async {
+    final collateralProvider = context.read<CollateralProvider>();
+    final breezProvider = context.read<BreezProvider>();
+    
+    // Obter saldo da carteira
+    int walletBalance = 0;
+    try {
+      final balanceInfo = await breezProvider.getBalance();
+      walletBalance = balanceInfo['balanceSat'] ?? 0;
+    } catch (e) {
+      debugPrint('⚠️ Erro ao obter saldo: $e');
+    }
+    
+    await collateralProvider.initialize(
+      widget.providerId,
+      walletBalance: walletBalance,
+    );
   }
 
   @override
@@ -43,6 +59,14 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () async {
+              await _loadData();
+            },
+          ),
+        ],
       ),
       body: Consumer<CollateralProvider>(
         builder: (context, collateralProvider, child) {
@@ -59,16 +83,19 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
                 children: [
                   const Icon(Icons.error_outline, color: Colors.red, size: 48),
                   const SizedBox(height: 16),
-                  Text(
-                    'Erro: ${collateralProvider.error}',
-                    style: const TextStyle(color: Colors.white70),
-                    textAlign: TextAlign.center,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Text(
+                      '${collateralProvider.error}',
+                      style: const TextStyle(color: Colors.white70),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   ElevatedButton(
-                    onPressed: () {
+                    onPressed: () async {
                       collateralProvider.clearError();
-                      collateralProvider.initialize(widget.providerId);
+                      await _loadData();
                     },
                     child: const Text('Tentar Novamente'),
                   ),
@@ -82,6 +109,10 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Saldo da carteira
+                _buildWalletBalance(collateralProvider),
+                const SizedBox(height: 16),
+                
                 // Status atual
                 _buildCurrentStatus(collateralProvider),
                 const SizedBox(height: 24),
@@ -94,9 +125,12 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
                 _buildTiersSection(collateralProvider),
                 const SizedBox(height: 24),
 
-                // Botão de depósito
+                // Botão de depósito ou remover
                 if (_selectedTier != null && !collateralProvider.hasCollateral)
                   _buildDepositButton(collateralProvider),
+                  
+                if (collateralProvider.hasCollateral)
+                  _buildRemoveCollateralButton(collateralProvider),
               ],
             ),
           );
@@ -104,10 +138,79 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
       ),
     );
   }
+  
+  Widget _buildWalletBalance(CollateralProvider provider) {
+    final btcPrice = provider.btcPriceBrl ?? 0;
+    final balanceSats = provider.walletBalanceSats;
+    final balanceBrl = btcPrice > 0 ? (balanceSats / 100000000) * btcPrice : 0.0;
+    
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.orange.withOpacity(0.2), Colors.deepOrange.withOpacity(0.1)],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.orange.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.account_balance_wallet, color: Colors.orange, size: 28),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Sua Carteira',
+                  style: TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$balanceSats sats',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  '≈ R\$ ${balanceBrl.toStringAsFixed(2)}',
+                  style: const TextStyle(color: Colors.orange, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+          if (provider.hasCollateral) ...[
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                const Text(
+                  'Travado',
+                  style: TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+                Text(
+                  '${provider.localCollateral?.lockedSats ?? 0} sats',
+                  style: const TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 
   Widget _buildCurrentStatus(CollateralProvider provider) {
     final hasCollateral = provider.hasCollateral;
-    final currentTier = provider.getCurrentTier();
+    final localCollateral = provider.localCollateral;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -141,41 +244,63 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
               ),
             ],
           ),
-          if (hasCollateral) ...[
+          if (hasCollateral && localCollateral != null) ...[
             const SizedBox(height: 16),
             const Divider(color: Colors.white12),
             const SizedBox(height: 16),
             _buildStatusRow(
               'Tier Atual',
-              currentTier?.name ?? 'N/A',
+              localCollateral.tierName,
               Icons.star,
               Colors.orange,
             ),
             const SizedBox(height: 12),
             _buildStatusRow(
-              'Garantia Total',
-              '${provider.collateral!['total_collateral'] ?? 0} sats',
+              'Garantia Travada',
+              '${localCollateral.lockedSats} sats',
               Icons.lock,
               Colors.green,
             ),
             const SizedBox(height: 12),
             _buildStatusRow(
-              'Disponível',
-              '${provider.collateral!['available_sats'] ?? 0} sats',
-              Icons.account_balance_wallet,
+              'Máximo por Ordem',
+              'R\$ ${localCollateral.maxOrderBrl.toStringAsFixed(0)}',
+              Icons.attach_money,
               Colors.blue,
             ),
             const SizedBox(height: 12),
             _buildStatusRow(
-              'Bloqueado em Ordens',
-              '${provider.collateral!['locked_sats'] ?? 0} sats',
-              Icons.hourglass_empty,
-              Colors.yellow,
+              'Ordens Ativas',
+              '${localCollateral.activeOrders}',
+              Icons.list_alt,
+              localCollateral.activeOrders > 0 ? Colors.yellow : Colors.white60,
             ),
+            if (localCollateral.activeOrders > 0) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.yellow.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info, color: Colors.yellow, size: 16),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Finalize as ordens em aberto para poder sacar ou alterar a garantia.',
+                        style: TextStyle(color: Colors.yellow, fontSize: 11),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ] else ...[
             const SizedBox(height: 12),
             const Text(
-              'Deposite uma garantia para começar a aceitar ordens e ganhar taxas!',
+              'Selecione um nível de garantia para começar a aceitar ordens e ganhar com pagamentos!',
               style: TextStyle(color: Colors.white70),
             ),
           ],
@@ -216,12 +341,12 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              const Icon(Icons.lightbulb_outline, color: Colors.blue, size: 24),
-              const SizedBox(width: 8),
-              const Text(
-                'Como Funciona',
+              Icon(Icons.lightbulb_outline, color: Colors.blue, size: 24),
+              SizedBox(width: 8),
+              Text(
+                'Como Funciona a Garantia Local',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 18,
@@ -231,20 +356,35 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          _buildExplanationPoint('1️⃣', 'Deposite Bitcoin como garantia (bloqueado temporariamente)'),
-          _buildExplanationPoint('2️⃣', 'Aceite ordens de acordo com seu nível de garantia'),
-          _buildExplanationPoint('3️⃣', 'Pague a conta no banco e envie comprovante'),
-          _buildExplanationPoint('4️⃣', 'Receba Bitcoin do usuário + 3% de taxa'),
-          _buildExplanationPoint('5️⃣', 'Garantia é desbloqueada automaticamente'),
+          _buildExplanationPoint('💳', 'Seus sats ficam na SUA carteira (auto-custódia)'),
+          _buildExplanationPoint('🔒', 'Parte do saldo fica "travada" como garantia'),
+          _buildExplanationPoint('📊', 'O nível de garantia define o valor máximo das ordens'),
+          _buildExplanationPoint('✅', 'Ao completar ordens, a garantia continua na sua carteira'),
+          _buildExplanationPoint('💰', 'Você pode sacar quando não tiver ordens em aberto'),
           const SizedBox(height: 12),
           const Divider(color: Colors.white12),
           const SizedBox(height: 12),
-          const Text(
-            '⚠️ A garantia protege o usuário contra fraude. Em caso de disputa, ela pode ser cortada.',
-            style: TextStyle(
-              color: Colors.orange,
-              fontSize: 12,
-              fontStyle: FontStyle.italic,
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.green.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.security, color: Colors.green, size: 16),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Diferente de outros sistemas, seus fundos NUNCA saem da sua carteira!',
+                    style: TextStyle(
+                      color: Colors.green,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -287,6 +427,11 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
+        const SizedBox(height: 8),
+        Text(
+          'Seu saldo: ${provider.walletBalanceSats} sats',
+          style: const TextStyle(color: Colors.orange, fontSize: 14),
+        ),
         const SizedBox(height: 16),
         ...provider.availableTiers!.map((tier) => _buildTierCard(tier, provider)),
       ],
@@ -295,28 +440,35 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
 
   Widget _buildTierCard(CollateralTier tier, CollateralProvider provider) {
     final isSelected = _selectedTier?.id == tier.id;
-    final isCurrentTier = provider.getCurrentTier()?.id == tier.id;
+    final isCurrentTier = provider.localCollateral?.tierId == tier.id;
     final isAvailable = _isTierAvailable(tier.id);
+    final hasEnoughBalance = provider.walletBalanceSats >= tier.requiredCollateralSats;
 
     return GestureDetector(
-      onTap: (!isAvailable || provider.hasCollateral) ? null : () {
+      onTap: (!isAvailable || provider.hasCollateral || !hasEnoughBalance) ? null : () {
         setState(() {
           _selectedTier = tier;
         });
       },
       child: Opacity(
-        opacity: isAvailable ? 1.0 : 0.6,
+        opacity: (isAvailable && hasEnoughBalance) ? 1.0 : 0.6,
         child: Container(
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: isSelected
                 ? Colors.orange.withOpacity(0.2)
-                : const Color(0xFF1E1E1E),
+                : isCurrentTier
+                    ? Colors.green.withOpacity(0.1)
+                    : const Color(0xFF1E1E1E),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isSelected ? Colors.orange : (isAvailable ? Colors.white12 : Colors.white10),
-              width: isSelected ? 2 : 1,
+              color: isSelected 
+                  ? Colors.orange 
+                  : isCurrentTier 
+                      ? Colors.green 
+                      : (isAvailable ? Colors.white12 : Colors.white10),
+              width: isSelected || isCurrentTier ? 2 : 1,
             ),
           ),
           child: Column(
@@ -382,6 +534,25 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
                                 ),
                               ),
                             ],
+                            if (isAvailable && !hasEnoughBalance && !isCurrentTier) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: Colors.red),
+                                ),
+                                child: const Text(
+                                  'SALDO BAIXO',
+                                  style: TextStyle(
+                                    color: Colors.red,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                         Text(
@@ -391,7 +562,7 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
                       ],
                     ),
                   ),
-                  if (isSelected && !provider.hasCollateral && isAvailable)
+                  if (isSelected && !provider.hasCollateral && isAvailable && hasEnoughBalance)
                     const Icon(Icons.check_circle, color: Colors.orange),
                 ],
               ),
@@ -474,12 +645,14 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
   }
 
   Widget _buildDepositButton(CollateralProvider provider) {
+    final hasEnoughBalance = provider.walletBalanceSats >= _selectedTier!.requiredCollateralSats;
+    
     return Padding(
-      padding: const EdgeInsets.only(bottom: 80), // Espaço para não ficar atrás dos botões de navegação
+      padding: const EdgeInsets.only(bottom: 80),
       child: SizedBox(
         width: double.infinity,
         child: ElevatedButton(
-          onPressed: () async {
+          onPressed: hasEnoughBalance ? () async {
             if (_selectedTier == null) return;
             
             // Verificar se tier está disponível
@@ -493,57 +666,117 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
               return;
             }
 
-            // Em modo teste, simular depósito
-            if (AppConfig.testMode) {
-              _showTestDepositDialog();
-              return;
-            }
-
-            // Em produção, verificar se SDK está disponível
-            final breezProvider = context.read<BreezProvider>();
-            if (breezProvider.sdk == null) {
+            // Verificar saldo
+            if (!hasEnoughBalance) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('SDK não inicializado. Aguarde...'),
-                  backgroundColor: Colors.orange,
+                SnackBar(
+                  content: Text('Saldo insuficiente. Você precisa de ${_selectedTier!.requiredCollateralSats} sats.'),
+                  backgroundColor: Colors.red,
                 ),
               );
               return;
             }
 
-            // Criar invoice
-            final result = await provider.depositCollateral(
-              providerId: widget.providerId,
-              tierId: _selectedTier!.id,
-              sdk: breezProvider.sdk!,
+            // Mostrar confirmação
+            _showConfirmDepositDialog(provider);
+          } : null,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: hasEnoughBalance ? Colors.orange : Colors.grey,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          child: Column(
+            children: [
+              Text(
+                hasEnoughBalance 
+                    ? 'Travar ${_selectedTier!.requiredCollateralSats} sats como Garantia'
+                    : 'Saldo Insuficiente',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              if (hasEnoughBalance)
+                Text(
+                  '≈ R\$ ${_selectedTier!.requiredCollateralBrl.toStringAsFixed(2)}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              if (!hasEnoughBalance)
+                Text(
+                  'Precisa de ${_selectedTier!.requiredCollateralSats - provider.walletBalanceSats} sats a mais',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildRemoveCollateralButton(CollateralProvider provider) {
+    final canWithdraw = provider.canWithdraw();
+    
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 80),
+      child: SizedBox(
+        width: double.infinity,
+        child: OutlinedButton(
+          onPressed: canWithdraw ? () async {
+            final confirmed = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                backgroundColor: const Color(0xFF1E1E1E),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                title: const Row(
+                  children: [
+                    Icon(Icons.warning, color: Colors.orange),
+                    SizedBox(width: 8),
+                    Text('Remover Garantia', style: TextStyle(color: Colors.white)),
+                  ],
+                ),
+                content: const Text(
+                  'Ao remover a garantia, você não poderá mais aceitar novas ordens até configurar uma nova garantia.\n\nSeus sats continuarão na sua carteira.',
+                  style: TextStyle(color: Colors.white70),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(false),
+                    child: const Text('Cancelar'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(ctx).pop(true),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                    child: const Text('Remover'),
+                  ),
+                ],
+              ),
             );
-
-            if (result != null && result['invoice'] != null) {
-              if (mounted) {
-                _showInvoiceDialog(result);
-              }
-            } else {
-              if (mounted) {
+            
+            if (confirmed == true) {
+              final success = await provider.removeCollateral();
+              if (success && mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Erro ao criar invoice: ${provider.error ?? "Desconhecido"}'),
-                    backgroundColor: Colors.red,
+                  const SnackBar(
+                    content: Text('✅ Garantia removida! Seus sats estão disponíveis.'),
+                    backgroundColor: Colors.green,
                   ),
                 );
               }
             }
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.orange,
+          } : null,
+          style: OutlinedButton.styleFrom(
+            side: BorderSide(color: canWithdraw ? Colors.red : Colors.grey),
             padding: const EdgeInsets.symmetric(vertical: 16),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
           child: Text(
-            'Depositar R\$ ${_selectedTier!.requiredCollateralBrl.toStringAsFixed(0)}',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
+            canWithdraw 
+                ? 'Remover Garantia' 
+                : 'Finalize as ordens para remover',
+            style: TextStyle(
+              color: canWithdraw ? Colors.red : Colors.grey,
+              fontSize: 16,
             ),
           ),
         ),
@@ -551,8 +784,8 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
     );
   }
   
-  /// Mostrar dialog de depósito em modo teste
-  void _showTestDepositDialog() {
+  /// Mostrar dialog de confirmação para travar garantia
+  void _showConfirmDepositDialog(CollateralProvider provider) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -560,9 +793,9 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Row(
           children: [
-            Icon(Icons.science, color: Colors.orange),
+            Icon(Icons.lock, color: Colors.orange),
             SizedBox(width: 8),
-            Text('Modo Teste', style: TextStyle(color: Colors.white)),
+            Text('Confirmar Garantia', style: TextStyle(color: Colors.white)),
           ],
         ),
         content: Column(
@@ -570,18 +803,51 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Depósito de Garantia: R\$ ${_selectedTier!.requiredCollateralBrl.toStringAsFixed(0)}',
+              'Tier: ${_selectedTier!.name}',
               style: const TextStyle(color: Colors.white, fontSize: 16),
             ),
             const SizedBox(height: 8),
             Text(
-              '≈ ${_selectedTier!.requiredCollateralSats} sats',
-              style: const TextStyle(color: Colors.orange, fontSize: 14),
+              'Garantia: ${_selectedTier!.requiredCollateralSats} sats',
+              style: const TextStyle(color: Colors.orange, fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              '≈ R\$ ${_selectedTier!.requiredCollateralBrl.toStringAsFixed(2)}',
+              style: const TextStyle(color: Colors.white60, fontSize: 14),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'Em modo teste, o depósito é simulado. Em produção, você precisará pagar uma invoice Lightning.',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.green.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.green.withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.security, color: Colors.green, size: 16),
+                      SizedBox(width: 8),
+                      Text(
+                        'Auto-custódia',
+                        style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Os sats ficam na SUA carteira. Apenas "travados" enquanto você aceita ordens.',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Máximo por ordem: R\$ ${_selectedTier!.maxOrderValueBrl.toStringAsFixed(0)}',
+              style: const TextStyle(color: Colors.white54, fontSize: 12),
             ),
           ],
         ),
@@ -591,105 +857,82 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
             child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.of(ctx).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('✅ Garantia de R\$ ${_selectedTier!.requiredCollateralBrl.toStringAsFixed(0)} simulada com sucesso!'),
-                  backgroundColor: Colors.green,
-                ),
+              
+              // Obter saldo da carteira
+              final breezProvider = context.read<BreezProvider>();
+              int walletBalance = 0;
+              try {
+                final balanceInfo = await breezProvider.getBalance();
+                walletBalance = balanceInfo['balanceSat'] ?? 0;
+              } catch (e) {
+                debugPrint('⚠️ Erro ao obter saldo: $e');
+              }
+              
+              if (walletBalance == 0) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Carteira não inicializada ou sem saldo.'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
+                return;
+              }
+
+              final result = await provider.depositCollateral(
+                providerId: widget.providerId,
+                tierId: _selectedTier!.id,
+                walletBalanceSats: walletBalance,
               );
-              // Voltar para tela anterior
-              Navigator.of(context).pop();
+
+              if (result != null && result['success'] == true) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('✅ Garantia ${result['tier']} ativada! Máximo R\$ ${(result['max_order_brl'] as double).toStringAsFixed(0)}/ordem'),
+                      backgroundColor: Colors.green,
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                  setState(() {
+                    _selectedTier = null;
+                  });
+                }
+              } else {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Erro: ${provider.error ?? "Desconhecido"}'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-            child: const Text('Simular Depósito'),
+            child: const Text('Confirmar'),
           ),
         ],
       ),
     );
   }
-
-  void _showInvoiceDialog(Map<String, dynamic> result) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF121212),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Pagar Garantia',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: QrImageView(
-                  data: result['invoice'],
-                  version: QrVersions.auto,
-                  size: 200,
-                  backgroundColor: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                '${result['amount_sats']} sats',
-                style: const TextStyle(
-                  color: Colors.orange,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: result['invoice']));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Invoice copiada!')),
-                  );
-                },
-                icon: const Icon(Icons.copy, size: 16, color: Colors.orange),
-                label: const Text('Copiar Invoice'),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Pague esta invoice para ativar sua garantia.',
-                style: TextStyle(color: Colors.white70, fontSize: 12),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              Navigator.of(context).pop(); // Volta para tela anterior
-            },
-            child: const Text('Fechar'),
-          ),
-        ],
-      ),
-    );
-  }
-
   IconData _getTierIcon(String tierId) {
     switch (tierId) {
+      case 'trial':
+        return Icons.play_arrow;
       case 'starter':
         return Icons.emoji_events_outlined;
       case 'basic':
         return Icons.star_outline;
-      case 'intermediate':
+      case 'pro':
         return Icons.star_half;
-      case 'advanced':
+      case 'elite':
         return Icons.star;
+      case 'ultimate':
+        return Icons.diamond;
       default:
         return Icons.star_outline;
     }
@@ -697,14 +940,18 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
 
   Color _getTierColor(String tierId) {
     switch (tierId) {
+      case 'trial':
+        return Colors.teal;
       case 'starter':
         return Colors.green;
       case 'basic':
         return Colors.orange;
-      case 'intermediate':
+      case 'pro':
         return Colors.blue;
-      case 'advanced':
+      case 'elite':
         return Colors.purple;
+      case 'ultimate':
+        return Colors.amber;
       default:
         return Colors.grey;
     }
@@ -712,7 +959,7 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
   
   /// Verifica se o tier está disponível para seleção
   bool _isTierAvailable(String tierId) {
-    // Tiers disponíveis: trial, starter, basic
-    return tierId == 'trial' || tierId == 'starter' || tierId == 'basic';
+    // Tiers disponíveis: trial, starter, basic, pro, elite, ultimate
+    return true; // Todos disponíveis no sistema local
   }
 }

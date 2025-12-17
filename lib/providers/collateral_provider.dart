@@ -1,30 +1,36 @@
 import 'package:flutter/foundation.dart';
 import '../models/collateral_tier.dart';
-import '../services/escrow_service.dart';
 import '../services/bitcoin_price_service.dart';
-import '../config.dart';
-import 'package:breez_sdk_spark_flutter/breez_sdk_spark.dart' as spark;
+import '../services/local_collateral_service.dart';
 
 /// Provider para gerenciar garantias (collateral) dos provedores
+/// Usa sistema local de garantia (fundos ficam na carteira do próprio provedor)
 class CollateralProvider with ChangeNotifier {
-  final EscrowService _escrowService = EscrowService();
   final BitcoinPriceService _priceService = BitcoinPriceService();
+  final LocalCollateralService _localCollateralService = LocalCollateralService();
 
   Map<String, dynamic>? _collateral;
   List<CollateralTier>? _availableTiers;
   double? _btcPriceBrl;
   bool _isLoading = false;
   String? _error;
+  LocalCollateral? _localCollateral; // Sistema local de garantia
+  int _walletBalanceSats = 0; // Saldo atual da carteira
 
   Map<String, dynamic>? get collateral => _collateral;
   List<CollateralTier>? get availableTiers => _availableTiers;
   double? get btcPriceBrl => _btcPriceBrl;
   bool get isLoading => _isLoading;
   String? get error => _error;
-  bool get hasCollateral => _collateral != null;
+  bool get hasCollateral => _collateral != null || _localCollateral != null;
+  LocalCollateral? get localCollateral => _localCollateral;
+  int get walletBalanceSats => _walletBalanceSats;
+  int get availableBalanceSats => _localCollateral != null 
+      ? _localCollateralService.getAvailableBalance(_localCollateral!, _walletBalanceSats)
+      : _walletBalanceSats;
 
   /// Inicializar: carrega preço do Bitcoin e garantia do provedor
-  Future<void> initialize(String providerId) async {
+  Future<void> initialize(String providerId, {int? walletBalance}) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -42,25 +48,29 @@ class CollateralProvider with ChangeNotifier {
       _availableTiers = CollateralTier.getAvailableTiers(_btcPriceBrl!);
       debugPrint('📊 Tiers disponíveis: ${_availableTiers!.length}');
 
-      // Carregar garantia do provedor
-      // Em modo teste, não buscar do backend
-      if (AppConfig.providerTestMode) {
-        debugPrint('🧪 Modo teste: sem garantia real');
-        _collateral = null;
-      } else {
-        try {
-          _collateral = await _escrowService.getProviderCollateral(providerId);
-        } catch (e) {
-          debugPrint('⚠️ Erro ao buscar garantia: $e');
-          _collateral = null;
-        }
+      // Usar saldo da carteira se fornecido
+      if (walletBalance != null) {
+        _walletBalanceSats = walletBalance;
+        debugPrint('💳 Saldo da carteira: $_walletBalanceSats sats');
       }
-      
-      if (_collateral != null) {
-        final totalCollateral = _collateral!['total_collateral'] ?? 0;
-        debugPrint('✅ Garantia carregada: $totalCollateral sats');
+
+      // SISTEMA LOCAL: Carregar garantia local (fundos ficam na carteira do provedor)
+      _localCollateral = await _localCollateralService.getCollateral();
+      if (_localCollateral != null) {
+        debugPrint('✅ Garantia local carregada: ${_localCollateral!.tierName}');
+        debugPrint('   Sats travados: ${_localCollateral!.lockedSats}');
+        debugPrint('   Ordens ativas: ${_localCollateral!.activeOrders}');
+        
+        // Converter garantia local para formato legado (compatibilidade)
+        _collateral = {
+          'current_tier_id': _localCollateral!.tierId,
+          'total_collateral': _localCollateral!.lockedSats,
+          'locked_amount': _localCollateral!.lockedSats,
+          'available_amount': _localCollateralService.getAvailableBalance(_localCollateral!, _walletBalanceSats),
+        };
       } else {
-        debugPrint('📭 Provedor não possui garantia depositada');
+        debugPrint('📭 Provedor não possui garantia configurada');
+        _collateral = null;
       }
 
       _isLoading = false;
@@ -73,11 +83,18 @@ class CollateralProvider with ChangeNotifier {
     }
   }
 
-  /// Depositar garantia (criar invoice)
+  /// Atualizar saldo da carteira
+  void updateWalletBalance(int balanceSats) {
+    _walletBalanceSats = balanceSats;
+    debugPrint('💳 Saldo atualizado: $_walletBalanceSats sats');
+    notifyListeners();
+  }
+
+  /// Depositar garantia (SISTEMA LOCAL: trava fundos na carteira do provedor)
   Future<Map<String, dynamic>?> depositCollateral({
     required String providerId,
     required String tierId,
-    required spark.BreezSdk sdk,
+    required int walletBalanceSats,
   }) async {
     if (_availableTiers == null || _btcPriceBrl == null) {
       _error = 'Dados não carregados. Chame initialize() primeiro.';
@@ -93,23 +110,50 @@ class CollateralProvider with ChangeNotifier {
       // Encontrar tier selecionado
       final tier = _availableTiers!.firstWhere((t) => t.id == tierId);
       
-      debugPrint('💳 Depositando garantia para tier: ${tier.name}');
+      debugPrint('💳 Configurando garantia para tier: ${tier.name}');
       debugPrint('   Valor: ${tier.requiredCollateralSats} sats (R\$ ${tier.requiredCollateralBrl})');
 
-      // Criar invoice
-      final result = await _escrowService.depositCollateral(
-        tierId: tierId,
-        amountSats: tier.requiredCollateralSats,
-      );
+      // Atualizar e verificar saldo da carteira
+      _walletBalanceSats = walletBalanceSats;
+      
+      if (_walletBalanceSats < tier.requiredCollateralSats) {
+        _error = 'Saldo insuficiente. Você tem $_walletBalanceSats sats, mas precisa de ${tier.requiredCollateralSats} sats para o tier ${tier.name}.';
+        _isLoading = false;
+        notifyListeners();
+        return null;
+      }
 
-      debugPrint('✅ Invoice criada: ${result['invoice']}');
+      // SISTEMA LOCAL: Salvar garantia localmente (os fundos ficam na carteira)
+      _localCollateral = await _localCollateralService.setCollateral(
+        tierId: tierId,
+        tierName: tier.name,
+        requiredSats: tier.requiredCollateralSats,
+        maxOrderBrl: tier.maxOrderValueBrl,
+      );
+      
+      // Converter para formato legado
+      _collateral = {
+        'current_tier_id': tierId,
+        'total_collateral': tier.requiredCollateralSats,
+        'locked_amount': tier.requiredCollateralSats,
+        'available_amount': _localCollateralService.getAvailableBalance(_localCollateral!, _walletBalanceSats),
+      };
+
+      debugPrint('✅ Garantia configurada! Tier: ${tier.name}');
+      debugPrint('   Sats "travados": ${tier.requiredCollateralSats}');
+      debugPrint('   Máximo por ordem: R\$ ${tier.maxOrderValueBrl}');
       
       _isLoading = false;
       notifyListeners();
       
-      return result;
+      return {
+        'success': true,
+        'tier': tier.name,
+        'locked_sats': tier.requiredCollateralSats,
+        'max_order_brl': tier.maxOrderValueBrl,
+      };
     } catch (e) {
-      debugPrint('❌ Erro ao depositar garantia: $e');
+      debugPrint('❌ Erro ao configurar garantia: $e');
       _error = e.toString();
       _isLoading = false;
       notifyListeners();
@@ -118,35 +162,84 @@ class CollateralProvider with ChangeNotifier {
   }
 
   /// Atualizar garantia do provedor
-  Future<void> refreshCollateral(String providerId) async {
+  Future<void> refreshCollateral(String providerId, {int? walletBalance}) async {
     try {
-      _collateral = await _escrowService.getProviderCollateral(providerId);
+      // Atualizar saldo da carteira se fornecido
+      if (walletBalance != null) {
+        _walletBalanceSats = walletBalance;
+      }
+      
+      // Recarregar garantia local
+      _localCollateral = await _localCollateralService.getCollateral();
+      
+      if (_localCollateral != null) {
+        _collateral = {
+          'current_tier_id': _localCollateral!.tierId,
+          'total_collateral': _localCollateral!.lockedSats,
+          'locked_amount': _localCollateral!.lockedSats,
+          'available_amount': _localCollateralService.getAvailableBalance(_localCollateral!, _walletBalanceSats),
+        };
+      }
+      
       notifyListeners();
     } catch (e) {
       debugPrint('❌ Erro ao atualizar garantia: $e');
     }
   }
 
-  /// Verificar se pode aceitar uma ordem
+  /// Verificar se pode aceitar uma ordem (sistema local)
   bool canAcceptOrder(double orderValueBrl) {
-    if (_collateral == null || _btcPriceBrl == null) {
-      debugPrint('❌ canAcceptOrder: Sem garantia ou preço BTC');
+    // Se tem garantia local, usar sistema local
+    if (_localCollateral != null) {
+      final canAccept = _localCollateralService.canAcceptOrder(_localCollateral!, orderValueBrl, _walletBalanceSats);
+      debugPrint('📊 canAcceptOrder (local): R\$ $orderValueBrl -> ${canAccept ? "✅" : "❌"}');
+      return canAccept;
+    }
+    
+    // Fallback: sem garantia
+    debugPrint('❌ canAcceptOrder: Sem garantia configurada');
+    return false;
+  }
+
+  /// Travar saldo para uma ordem específica
+  Future<bool> lockForOrder(String orderId, double orderValueBrl) async {
+    if (_localCollateral == null) return false;
+    
+    _localCollateral = await _localCollateralService.lockForOrder(_localCollateral!, orderId);
+    notifyListeners();
+    return true;
+  }
+
+  /// Destravar saldo quando ordem for concluída/cancelada
+  Future<bool> unlockOrder(String orderId) async {
+    if (_localCollateral == null) return false;
+    
+    _localCollateral = await _localCollateralService.unlockOrder(_localCollateral!, orderId);
+    notifyListeners();
+    return true;
+  }
+
+  /// Verificar se pode sacar (sem ordens em aberto)
+  bool canWithdraw() {
+    if (_localCollateral == null) return true;
+    return _localCollateralService.canWithdraw(_localCollateral!);
+  }
+
+  /// Remover garantia (liberar para saque)
+  Future<bool> removeCollateral() async {
+    if (_localCollateral == null) return true;
+    
+    if (!canWithdraw()) {
+      _error = 'Você tem ordens em aberto. Finalize-as antes de remover a garantia.';
+      notifyListeners();
       return false;
     }
     
-    // Obter tier atual do provedor
-    final currentTier = getCurrentTier();
-    if (currentTier == null) {
-      debugPrint('❌ canAcceptOrder: Sem tier atual');
-      return false;
-    }
-    
-    // Verificar se o valor da ordem está dentro do limite do tier
-    final canAccept = orderValueBrl <= currentTier.maxOrderValueBrl;
-    
-    debugPrint('📊 canAcceptOrder: Ordem R\$ $orderValueBrl, Tier ${currentTier.name} (máx R\$ ${currentTier.maxOrderValueBrl}) -> ${canAccept ? "✅" : "❌"}');
-    
-    return canAccept;
+    await _localCollateralService.withdrawAll();
+    _localCollateral = null;
+    _collateral = null;
+    notifyListeners();
+    return true;
   }
   
   /// Retorna o valor máximo de ordem que o provedor pode aceitar

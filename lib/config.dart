@@ -19,11 +19,11 @@ class AppConfig {
   
   /// Modo de teste - usa dados mockados, sem backend real
   /// ⚠️ PRODUÇÃO: DEVE SER FALSE
-  static const bool testMode = true; // Ativado para testes locais
+  static const bool testMode = false; // DESATIVADO para teste de garantias
   
   /// Permite provedores sem garantia depositada
   /// ⚠️ PRODUÇÃO: DEVE SER FALSE
-  static const bool providerTestMode = true; // Temporário para testes
+  static const bool providerTestMode = false; // DESATIVADO para teste de garantias
 
   // ============================================
   // BACKEND API
