@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../config.dart';
+import '../services/secure_storage_service.dart';
 
 /// Tela educacional sobre o sistema de provedor
 /// Explica como funciona, requisitos, riscos e benefícios
@@ -151,26 +152,43 @@ class ProviderEducationScreen extends StatelessWidget {
       ),
       child: Column(
         children: [
+          // 🧪 Tier Trial para testar
           _buildTierRow(
-            tier: 'Básico',
-            guarantee: 'R\$ 500',
-            maxOrder: 'até R\$ 500',
+            tier: '🧪 Trial',
+            guarantee: 'R\$ 10',
+            maxOrder: 'até R\$ 10',
+            color: Colors.green,
+            isHeader: false,
+          ),
+          const Divider(color: Colors.white12, height: 1),
+          _buildTierRow(
+            tier: '🥉 Iniciante',
+            guarantee: 'R\$ 50',
+            maxOrder: 'até R\$ 50',
+            color: Colors.orange,
+            isHeader: false,
+          ),
+          const Divider(color: Colors.white12, height: 1),
+          _buildTierRow(
+            tier: '🥈 Básico',
+            guarantee: 'R\$ 200',
+            maxOrder: 'até R\$ 200',
             color: Colors.grey,
             isHeader: false,
           ),
           const Divider(color: Colors.white12, height: 1),
           _buildTierRow(
-            tier: 'Intermediário',
-            guarantee: 'R\$ 1.000',
-            maxOrder: 'até R\$ 5.000',
+            tier: '🥇 Intermediário',
+            guarantee: 'R\$ 500',
+            maxOrder: 'até R\$ 500',
             color: Colors.blue,
             isHeader: false,
           ),
           const Divider(color: Colors.white12, height: 1),
           _buildTierRow(
-            tier: 'Avançado',
-            guarantee: 'R\$ 3.000',
-            maxOrder: 'Ilimitado',
+            tier: '💎 Avançado',
+            guarantee: 'R\$ 1.000',
+            maxOrder: 'até R\$ 1.000',
             color: Colors.purple,
             isHeader: false,
           ),
@@ -535,7 +553,10 @@ class ProviderEducationScreen extends StatelessWidget {
         SizedBox(
           width: double.infinity,
           child: ElevatedButton.icon(
-            onPressed: () {
+            onPressed: () async {
+              // Salvar que está iniciando modo provedor
+              await SecureStorageService.setProviderMode(true);
+              debugPrint('✅ Modo provedor salvo (via Começar Agora)');
               Navigator.pushNamed(context, '/provider-collateral');
             },
             icon: const Icon(Icons.rocket_launch),
@@ -554,9 +575,13 @@ class ProviderEducationScreen extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
-              onPressed: () {
+              onPressed: () async {
                 debugPrint('🧪 Clicou no botão Modo Teste');
                 try {
+                  // Salvar que o usuário está em modo provedor
+                  await SecureStorageService.setProviderMode(true);
+                  debugPrint('✅ Modo provedor salvo como ativo');
+                  
                   // Usar providerId fixo para modo teste (mesmo do balance)
                   const providerId = 'provider_test_001';
                   debugPrint('🧪 Navegando para /provider-orders com providerId: $providerId');

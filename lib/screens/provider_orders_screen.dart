@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/collateral_provider.dart';
 import '../providers/order_provider.dart';
 import '../services/escrow_service.dart';
+import '../services/secure_storage_service.dart';
 import '../config.dart';
 import 'provider_order_detail_screen.dart';
 
@@ -32,6 +33,11 @@ class _ProviderOrdersScreenState extends State<ProviderOrdersScreen> {
     super.initState();
     debugPrint('🟢 ProviderOrdersScreen initState iniciado');
     debugPrint('   providerId: ${widget.providerId}');
+    
+    // Salvar que está em modo provedor (garantir persistência)
+    SecureStorageService.setProviderMode(true);
+    debugPrint('✅ Modo provedor salvo como ativo (na tela de ordens)');
+    
     // Aguardar o frame completo antes de acessar o Provider
     WidgetsBinding.instance.addPostFrameCallback((_) {
       debugPrint('🟢 addPostFrameCallback executado, chamando _loadOrders');
@@ -137,14 +143,59 @@ class _ProviderOrdersScreenState extends State<ProviderOrdersScreen> {
           IconButton(
             icon: const Icon(Icons.account_balance_wallet),
             onPressed: () {
-              Navigator.pushNamed(context, '/provider-balance');
+              // Ir para carteira principal (unificada)
+              Navigator.pushNamed(context, '/wallet');
             },
-            tooltip: 'Meu Saldo',
+            tooltip: 'Minha Carteira',
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadOrders,
-            tooltip: 'Atualizar',
+          // Menu com mais opções
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              switch (value) {
+                case 'tier':
+                  Navigator.pushNamed(context, '/provider-collateral');
+                  break;
+                case 'education':
+                  Navigator.pushNamed(context, '/provider-education');
+                  break;
+                case 'refresh':
+                  _loadOrders();
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'tier',
+                child: Row(
+                  children: [
+                    Icon(Icons.upgrade, color: Colors.orange),
+                    SizedBox(width: 12),
+                    Text('Upgrade de Tier'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'education',
+                child: Row(
+                  children: [
+                    Icon(Icons.school, color: Colors.blue),
+                    SizedBox(width: 12),
+                    Text('Como Funciona'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'refresh',
+                child: Row(
+                  children: [
+                    Icon(Icons.refresh, color: Colors.green),
+                    SizedBox(width: 12),
+                    Text('Atualizar Ordens'),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -172,16 +223,102 @@ class _ProviderOrdersScreenState extends State<ProviderOrdersScreen> {
           return RefreshIndicator(
             onRefresh: _loadOrders,
             color: Colors.orange,
-            child: ListView.builder(
+            child: ListView(
               padding: const EdgeInsets.all(16),
-              itemCount: _availableOrders.length,
-              itemBuilder: (context, index) {
-                final order = _availableOrders[index];
-                return _buildOrderCard(order, collateralProvider);
-              },
+              children: [
+                // Card de status do tier
+                _buildTierStatusCard(collateralProvider),
+                const SizedBox(height: 16),
+                // Lista de ordens
+                ..._availableOrders.map((order) => _buildOrderCard(order, collateralProvider)),
+              ],
             ),
           );
         },
+      ),
+    );
+  }
+
+  /// Card mostrando o tier atual e opção de upgrade
+  Widget _buildTierStatusCard(CollateralProvider collateralProvider) {
+    final currentTier = collateralProvider.getCurrentTier();
+    final maxOrder = collateralProvider.getMaxOrderValue();
+    
+    // Em modo teste, mostrar tier Trial
+    final tierName = AppConfig.providerTestMode ? 'Trial (Teste)' : (currentTier?.name ?? 'Nenhum');
+    final tierMax = AppConfig.providerTestMode ? 'R\$ 10,00' : 'R\$ ${maxOrder.toStringAsFixed(0)}';
+    
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.deepPurple.shade800, Colors.deepPurple.shade600],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.deepPurple.withOpacity(0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.verified,
+              color: Colors.white,
+              size: 32,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Tier: $tierName',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Aceita ordens até $tierMax',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.8),
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pushNamed(context, '/provider-collateral');
+            },
+            icon: const Icon(Icons.upgrade, size: 18),
+            label: const Text('Upgrade'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

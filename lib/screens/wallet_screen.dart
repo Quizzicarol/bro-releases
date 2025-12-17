@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../providers/breez_provider_export.dart';
+import '../providers/provider_balance_provider.dart';
 
 /// Tela de Carteira Lightning - Apenas BOLT11 (invoice)
 /// Funções: Ver saldo, Enviar pagamento, Receber (gerar invoice)
@@ -46,13 +47,50 @@ class _WalletScreenState extends State<WalletScreen> {
       final balance = await breezProvider.getBalance();
       final payments = await breezProvider.listPayments();
       
+      // Carregar transações de ganhos como Bro
+      final providerBalanceProvider = context.read<ProviderBalanceProvider>();
+      await providerBalanceProvider.initialize('provider_test_001');
+      
+      // Mesclar transações do Bro com pagamentos Lightning
+      List<Map<String, dynamic>> allPayments = [...payments];
+      
+      if (providerBalanceProvider.balance != null) {
+        for (var tx in providerBalanceProvider.balance!.transactions) {
+          if (tx.type == 'earning') {
+            allPayments.add({
+              'type': 'received',
+              'amountSats': tx.amountSats.toInt(),
+              'amount': tx.amountSats.toInt(),
+              'createdAt': tx.createdAt,
+              'timestamp': tx.createdAt,
+              'description': tx.orderDescription ?? 'Ganho como Bro',
+              'isBroEarning': true,
+              'status': 'Complete',
+            });
+          }
+        }
+      }
+      
+      // Ordenar por data (mais recente primeiro)
+      allPayments.sort((a, b) {
+        final dateA = a['createdAt'] ?? a['timestamp'];
+        final dateB = b['createdAt'] ?? b['timestamp'];
+        if (dateA == null && dateB == null) return 0;
+        if (dateA == null) return 1;
+        if (dateB == null) return -1;
+        if (dateA is DateTime && dateB is DateTime) {
+          return dateB.compareTo(dateA);
+        }
+        return 0;
+      });
+      
       debugPrint('💰 Saldo: ${balance?['balance']} sats');
-      debugPrint('📜 Pagamentos: ${payments.length}');
+      debugPrint('📜 Pagamentos: ${allPayments.length} (incluindo ganhos Bro)');
 
       if (mounted) {
         setState(() {
           _balance = balance;
-          _payments = payments;
+          _payments = allPayments;
         });
       }
     } catch (e) {
@@ -1231,17 +1269,43 @@ class _WalletScreenState extends State<WalletScreen> {
     final isReceived = payment['type'] == 'received' || 
                        payment['direction'] == 'incoming' ||
                        payment['type'] == 'Receive';
+    final isBroEarning = payment['isBroEarning'] == true;
     final amount = payment['amountSats'] ?? payment['amount'] ?? 0;
     final status = payment['status']?.toString() ?? '';
     final date = payment['createdAt'] ?? payment['timestamp'];
+    final description = payment['description']?.toString() ?? '';
+    
+    // Determinar o label e cor baseado no tipo
+    String label;
+    Color iconColor;
+    IconData icon;
+    
+    if (isBroEarning) {
+      label = '💪 Ganho como Bro';
+      iconColor = Colors.green;
+      icon = Icons.volunteer_activism;
+    } else if (isReceived) {
+      label = 'Recebido';
+      iconColor = Colors.green;
+      icon = Icons.arrow_downward;
+    } else {
+      // Verificar se é pagamento de conta (descrição contém info de ordem)
+      if (description.contains('Ordem') || description.contains('conta')) {
+        label = '📄 Pagamento de Conta';
+      } else {
+        label = 'Enviado';
+      }
+      iconColor = Colors.red;
+      icon = Icons.arrow_upward;
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
+        color: isBroEarning ? const Color(0xFF1A2A1A) : const Color(0xFF1A1A1A),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF333333)),
+        border: Border.all(color: isBroEarning ? Colors.green.withOpacity(0.3) : const Color(0xFF333333)),
       ),
       child: Row(
         children: [
@@ -1249,14 +1313,12 @@ class _WalletScreenState extends State<WalletScreen> {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: isReceived
-                  ? Colors.green.withOpacity(0.2)
-                  : Colors.red.withOpacity(0.2),
+              color: iconColor.withOpacity(0.2),
               borderRadius: BorderRadius.circular(18),
             ),
             child: Icon(
-              isReceived ? Icons.arrow_downward : Icons.arrow_upward,
-              color: isReceived ? Colors.green : Colors.red,
+              icon,
+              color: iconColor,
               size: 18,
             ),
           ),
@@ -1266,7 +1328,7 @@ class _WalletScreenState extends State<WalletScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  isReceived ? 'Recebido' : 'Enviado',
+                  label,
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w600,

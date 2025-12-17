@@ -96,7 +96,16 @@ class ProviderBalanceProvider with ChangeNotifier {
     required String orderDescription,
     required double amountSats,
   }) async {
-    if (_balance == null) return false;
+    // Auto-inicializar se necessário (provider padrão para modo teste)
+    if (_balance == null) {
+      debugPrint('⚠️ ProviderBalanceProvider não inicializado, inicializando automaticamente...');
+      await initialize('provider_test_001');
+    }
+    
+    if (_balance == null) {
+      debugPrint('❌ Falha ao inicializar ProviderBalanceProvider');
+      return false;
+    }
 
     try {
       final transaction = BalanceTransaction(

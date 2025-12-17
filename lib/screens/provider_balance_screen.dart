@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/provider_balance_provider.dart';
+import '../providers/breez_provider_export.dart';
 import '../models/provider_balance.dart';
 
 /// Tela para visualizar saldo e histórico do provedor
@@ -13,13 +14,37 @@ class ProviderBalanceScreen extends StatefulWidget {
 }
 
 class _ProviderBalanceScreenState extends State<ProviderBalanceScreen> {
+  int _breezBalanceSats = 0;
+  bool _loadingBreez = true;
+  
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // TODO: Usar ID real do provedor logado
       context.read<ProviderBalanceProvider>().initialize('provider_test_001');
+      _loadBreezBalance();
     });
+  }
+  
+  Future<void> _loadBreezBalance() async {
+    try {
+      final breezProvider = context.read<BreezProvider>();
+      if (breezProvider.isInitialized) {
+        final balance = await breezProvider.getBalance();
+        if (mounted) {
+          setState(() {
+            _breezBalanceSats = int.tryParse(balance?['balance']?.toString() ?? '0') ?? 0;
+            _loadingBreez = false;
+          });
+        }
+      } else {
+        setState(() => _loadingBreez = false);
+      }
+    } catch (e) {
+      debugPrint('❌ Erro ao carregar saldo Breez: $e');
+      if (mounted) setState(() => _loadingBreez = false);
+    }
   }
 
   @override
@@ -43,6 +68,7 @@ class _ProviderBalanceScreenState extends State<ProviderBalanceScreen> {
           return RefreshIndicator(
             onRefresh: () async {
               await balanceProvider.initialize('provider_test_001');
+              await _loadBreezBalance();
             },
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -50,6 +76,10 @@ class _ProviderBalanceScreenState extends State<ProviderBalanceScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // Card do saldo REAL (Breez Lightning)
+                  _buildRealBalanceCard(),
+                  const SizedBox(height: 16),
+                  // Card do saldo contábil do provedor
                   _buildBalanceCard(balance),
                   const SizedBox(height: 16),
                   _buildStatsCard(balance),
@@ -66,6 +96,68 @@ class _ProviderBalanceScreenState extends State<ProviderBalanceScreen> {
     );
   }
 
+  /// Card com o saldo REAL da carteira Lightning (Breez)
+  Widget _buildRealBalanceCard() {
+    return Card(
+      color: Colors.orange.shade800,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.flash_on, color: Colors.yellow, size: 24),
+                const SizedBox(width: 8),
+                const Text(
+                  'Carteira Lightning (Real)',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (_loadingBreez)
+              const CircularProgressIndicator(color: Colors.white)
+            else
+              Column(
+                children: [
+                  Text(
+                    '${_formatSats(_breezBalanceSats.toDouble())} sats',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '≈ ${_satsToReais(_breezBalanceSats.toDouble())}',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            const SizedBox(height: 12),
+            const Text(
+              '⚡ Saldo real na rede Lightning',
+              style: TextStyle(
+                color: Colors.white60,
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildBalanceCard(ProviderBalance balance) {
     return Card(
       color: Colors.deepPurple,
@@ -74,7 +166,7 @@ class _ProviderBalanceScreenState extends State<ProviderBalanceScreen> {
         child: Column(
           children: [
             const Text(
-              'Saldo Disponível',
+              'Ganhos como Bro (Contábil)',
               style: TextStyle(
                 color: Colors.white70,
                 fontSize: 16,
@@ -85,7 +177,7 @@ class _ProviderBalanceScreenState extends State<ProviderBalanceScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Icon(
-                  Icons.account_balance_wallet,
+                  Icons.volunteer_activism,
                   color: Colors.white,
                   size: 32,
                 ),
@@ -106,6 +198,15 @@ class _ProviderBalanceScreenState extends State<ProviderBalanceScreen> {
               style: const TextStyle(
                 color: Colors.white70,
                 fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '💡 Ganhos das ordens completadas',
+              style: TextStyle(
+                color: Colors.white60,
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
               ),
             ),
           ],

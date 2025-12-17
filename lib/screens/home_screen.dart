@@ -7,6 +7,7 @@ import '../providers/breez_provider_export.dart';
 import '../providers/order_provider.dart';
 import '../services/api_service.dart';
 import '../services/storage_service.dart';
+import '../services/secure_storage_service.dart';
 import '../widgets/stat_card.dart';
 import '../widgets/gradient_button.dart';
 import '../widgets/transaction_card.dart';
@@ -220,10 +221,45 @@ class _HomeScreenState extends State<HomeScreen> {
     final breezProvider = context.read<BreezProvider>();
     final orderProvider = context.read<OrderProvider>();
 
+    // Mostrar mensagem de progresso
+    _showSyncSnackbar('🔄 Conectando com a rede Nostr...');
+    
     await Future.wait([
       breezProvider.refresh(),
       orderProvider.fetchOrders(),
     ]);
+    
+    // Mostrar conclusão
+    if (mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      _showSyncSnackbar('✅ Dados atualizados!', duration: const Duration(seconds: 1));
+    }
+  }
+  
+  void _showSyncSnackbar(String message, {Duration duration = const Duration(seconds: 30)}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            if (!message.startsWith('✅'))
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              ),
+            if (!message.startsWith('✅')) const SizedBox(width: 12),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        duration: duration,
+        backgroundColor: const Color(0xFF2A2A2A),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> _fetchBitcoinPrice() async {
@@ -420,8 +456,21 @@ class _HomeScreenState extends State<HomeScreen> {
                 icon: Icons.volunteer_activism,
                 label: 'Modo Bro',
                 gradient: const [Color(0xFF3DE98C), Color(0xFF00CC7A)],
-                onTap: () {
-                  Navigator.pushNamed(context, '/provider-education');
+                onTap: () async {
+                  // Verificar se já está em modo provedor
+                  final isProvider = await SecureStorageService.isProviderMode();
+                  debugPrint('🔍 isProviderMode: $isProvider');
+                  
+                  if (isProvider) {
+                    // Já é provedor, ir direto para tela de ordens
+                    const providerId = 'provider_test_001';
+                    Navigator.pushNamed(context, '/provider-orders', arguments: {
+                      'providerId': providerId,
+                    });
+                  } else {
+                    // Não é provedor, mostrar educação primeiro
+                    Navigator.pushNamed(context, '/provider-education');
+                  }
                 },
               ),
             ),
@@ -971,8 +1020,21 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildProviderModeButton() {
     return GestureDetector(
-      onTap: () {
-        Navigator.pushNamed(context, '/provider-education');
+      onTap: () async {
+        // Verificar se já está em modo provedor
+        final isProvider = await SecureStorageService.isProviderMode();
+        debugPrint('🔍 isProviderMode (button): $isProvider');
+        
+        if (isProvider) {
+          // Já é provedor, ir direto para tela de ordens
+          const providerId = 'provider_test_001';
+          Navigator.pushNamed(context, '/provider-orders', arguments: {
+            'providerId': providerId,
+          });
+        } else {
+          // Não é provedor, mostrar educação primeiro
+          Navigator.pushNamed(context, '/provider-education');
+        }
       },
       child: Container(
         padding: const EdgeInsets.all(12),

@@ -712,7 +712,7 @@ class _ProviderCollateralScreenState extends State<ProviderCollateralScreen> {
   
   /// Verifica se o tier está disponível para seleção
   bool _isTierAvailable(String tierId) {
-    // Por enquanto, apenas starter e basic estão disponíveis
-    return tierId == 'starter' || tierId == 'basic';
+    // Tiers disponíveis: trial, starter, basic
+    return tierId == 'trial' || tierId == 'starter' || tierId == 'basic';
   }
 }
