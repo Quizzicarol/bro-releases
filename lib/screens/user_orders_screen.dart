@@ -205,6 +205,181 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
     }
   }
 
+  /// Mostra diagnóstico completo de pagamentos da carteira vs ordens
+  Future<void> _showPaymentDiagnostic() async {
+    final breezProvider = context.read<BreezProvider>();
+    final orderProvider = context.read<OrderProvider>();
+    
+    if (!breezProvider.isInitialized) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Carteira não inicializada'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    
+    // Mostrar loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        backgroundColor: Color(0xFF1E1E1E),
+        content: Row(
+          children: [
+            CircularProgressIndicator(color: Colors.blue),
+            SizedBox(width: 20),
+            Text('Analisando carteira e ordens...', style: TextStyle(color: Colors.white)),
+          ],
+        ),
+      ),
+    );
+    
+    try {
+      // Buscar saldo
+      final balanceInfo = await breezProvider.getBalance();
+      final balanceSats = balanceInfo['balance'] ?? '0';
+      
+      // Buscar todos os pagamentos da carteira
+      final payments = await breezProvider.getAllPayments();
+      
+      // Buscar todas as ordens
+      await orderProvider.fetchOrders();
+      final orders = orderProvider.orders;
+      
+      // Fechar loading
+      if (mounted) Navigator.pop(context);
+      
+      // Criar relatório
+      final paymentsReceived = payments.where((p) => 
+        p['status'] == 'PaymentStatus.completed' && 
+        (p['direction'] == 'RECEBIDO' || p['type']?.toString().contains('receive') == true)
+      ).toList();
+      
+      // Mapear paymentHashes da carteira
+      final walletHashes = <String>{};
+      for (var p in paymentsReceived) {
+        final hash = p['paymentHash']?.toString() ?? '';
+        if (hash.isNotEmpty && hash != 'N/A') {
+          walletHashes.add(hash);
+        }
+      }
+      
+      // Analisar ordens
+      final ordersWithHash = orders.where((o) => o.paymentHash != null && o.paymentHash!.isNotEmpty).toList();
+      final ordersPaid = <String>[];
+      final ordersNotPaid = <String>[];
+      
+      for (var order in ordersWithHash) {
+        if (walletHashes.contains(order.paymentHash)) {
+          ordersPaid.add('${order.id} - R\$ ${order.amount.toStringAsFixed(2)} (${order.status})');
+        } else {
+          ordersNotPaid.add('${order.id} - R\$ ${order.amount.toStringAsFixed(2)} (${order.status})');
+        }
+      }
+      
+      // Mostrar diálogo com resultado
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF1E1E1E),
+            title: const Text('🔍 Diagnóstico de Pagamentos', style: TextStyle(color: Colors.white)),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Saldo
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.account_balance_wallet, color: Colors.blue),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Saldo: $balanceSats sats',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Pagamentos na carteira
+                  Text(
+                    '💰 Pagamentos recebidos: ${paymentsReceived.length}',
+                    style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  
+                  // Ordens
+                  Text(
+                    '📋 Ordens com invoice: ${ordersWithHash.length}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Ordens PAGAS
+                  if (ordersPaid.isNotEmpty) ...[
+                    const Text(
+                      '✅ ORDENS PAGAS (confirmado na carteira):',
+                      style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                    const SizedBox(height: 4),
+                    ...ordersPaid.map((o) => Padding(
+                      padding: const EdgeInsets.only(left: 8, bottom: 4),
+                      child: Text(o, style: const TextStyle(color: Colors.green, fontSize: 11)),
+                    )),
+                    const SizedBox(height: 12),
+                  ],
+                  
+                  // Ordens NÃO PAGAS
+                  if (ordersNotPaid.isNotEmpty) ...[
+                    const Text(
+                      '❌ ORDENS NÃO PAGAS (não encontrado na carteira):',
+                      style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                    const SizedBox(height: 4),
+                    ...ordersNotPaid.map((o) => Padding(
+                      padding: const EdgeInsets.only(left: 8, bottom: 4),
+                      child: Text(o, style: const TextStyle(color: Colors.red, fontSize: 11)),
+                    )),
+                  ],
+                  
+                  if (ordersPaid.isEmpty && ordersNotPaid.isEmpty)
+                    const Text(
+                      'Nenhuma ordem com invoice encontrada',
+                      style: TextStyle(color: Colors.white54),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Fechar'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Erro: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   List<Map<String, dynamic>> _getFilteredOrders() {
     if (_filterStatus == 'all') {
       return _orders;
@@ -1052,6 +1227,12 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
         title: const Text('Minhas Ordens'),
         backgroundColor: Colors.blue,
         actions: [
+          // Botão para diagnóstico de pagamentos
+          IconButton(
+            icon: const Icon(Icons.bug_report),
+            onPressed: _showPaymentDiagnostic,
+            tooltip: 'Diagnóstico de pagamentos',
+          ),
           // Botão para verificar pagamentos pendentes
           IconButton(
             icon: const Icon(Icons.sync),
