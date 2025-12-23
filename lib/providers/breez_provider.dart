@@ -679,6 +679,116 @@ class BreezProvider with ChangeNotifier {
     }
   }
   
+  /// DIAGNÓSTICO: Lista todos os pagamentos da carteira para verificar quais ordens foram pagas
+  Future<List<Map<String, dynamic>>> getAllPayments() async {
+    if (!_isInitialized || _sdk == null) {
+      debugPrint('❌ SDK não inicializado para diagnóstico');
+      return [];
+    }
+
+    try {
+      await _sdk!.syncWallet(request: spark.SyncWalletRequest());
+      
+      final resp = await _sdk!.listPayments(
+        request: spark.ListPaymentsRequest(limit: 1000),
+      );
+
+      final payments = <Map<String, dynamic>>[];
+      
+      debugPrint('');
+      debugPrint('╔═══════════════════════════════════════════════════════════════╗');
+      debugPrint('║      DIAGNÓSTICO COMPLETO DE PAGAMENTOS DA CARTEIRA          ║');
+      debugPrint('╠═══════════════════════════════════════════════════════════════╣');
+      debugPrint('║  Total de pagamentos encontrados: ${resp.payments.length.toString().padLeft(3)}                       ║');
+      debugPrint('╚═══════════════════════════════════════════════════════════════╝');
+      debugPrint('');
+      
+      for (var p in resp.payments) {
+        String? paymentHash;
+        String direction = p.paymentType.toString().contains('receive') ? 'RECEBIDO' : 'ENVIADO';
+        
+        if (p.details is spark.PaymentDetails_Lightning) {
+          final details = p.details as spark.PaymentDetails_Lightning;
+          paymentHash = details.paymentHash;
+        }
+        
+        final paymentInfo = {
+          'id': p.id,
+          'amount': p.amount.toInt(),
+          'status': p.status.toString(),
+          'type': p.paymentType.toString(),
+          'direction': direction,
+          'paymentHash': paymentHash ?? 'N/A',
+        };
+        
+        payments.add(paymentInfo);
+        
+        final statusIcon = p.status == spark.PaymentStatus.completed ? '✅' : '❌';
+        debugPrint('$statusIcon [$direction] ${p.amount} sats');
+        debugPrint('   PaymentHash: ${paymentHash ?? "N/A"}');
+        debugPrint('   Status: ${p.status}');
+        debugPrint('');
+      }
+      
+      if (payments.isEmpty) {
+        debugPrint('⚠️ NENHUM PAGAMENTO ENCONTRADO NESTA CARTEIRA!');
+        debugPrint('   Isso pode significar:');
+        debugPrint('   1. A seed está correta mas nunca recebeu fundos');
+        debugPrint('   2. A seed está errada e deveria ser outra');
+      }
+      
+      return payments;
+    } catch (e) {
+      debugPrint('❌ Erro no diagnóstico: $e');
+      return [];
+    }
+  }
+  
+  /// DIAGNÓSTICO: Verifica uma lista de paymentHashes para ver quais foram pagos
+  Future<Map<String, bool>> checkMultiplePayments(List<String> paymentHashes) async {
+    if (!_isInitialized || _sdk == null) {
+      debugPrint('❌ SDK não inicializado');
+      return {};
+    }
+
+    try {
+      final resp = await _sdk!.listPayments(
+        request: spark.ListPaymentsRequest(limit: 1000),
+      );
+
+      // Criar mapa de paymentHash -> pago
+      final results = <String, bool>{};
+      
+      // Extrair todos os paymentHashes da carteira
+      final walletHashes = <String>{};
+      for (var p in resp.payments) {
+        if (p.details is spark.PaymentDetails_Lightning) {
+          final hash = (p.details as spark.PaymentDetails_Lightning).paymentHash;
+          if (p.status == spark.PaymentStatus.completed) {
+            walletHashes.add(hash);
+          }
+        }
+      }
+      
+      // Verificar quais dos hashes fornecidos estão na carteira
+      for (var hash in paymentHashes) {
+        results[hash] = walletHashes.contains(hash);
+      }
+      
+      debugPrint('');
+      debugPrint('🔍 VERIFICAÇÃO DE PAGAMENTOS:');
+      for (var entry in results.entries) {
+        final icon = entry.value ? '✅ PAGO' : '❌ NÃO PAGO';
+        debugPrint('   ${entry.key.substring(0, 16)}... → $icon');
+      }
+      
+      return results;
+    } catch (e) {
+      debugPrint('❌ Erro verificando pagamentos: $e');
+      return {};
+    }
+  }
+  
   /// Wait for payment to be received (blocking call with timeout)
   Future<Map<String, dynamic>> waitForPayment({
     required String paymentHash,
