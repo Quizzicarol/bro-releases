@@ -177,6 +177,52 @@ class Nip06Service {
     final hexStr = number.toRadixString(16).padLeft(length * 2, '0');
     return Uint8List.fromList(hex.decode(hexStr));
   }
+  
+  /// CRÍTICO: Deriva uma seed BIP-39 DETERMINÍSTICA da chave privada Nostr
+  /// Isso permite que: mesma chave Nostr = mesma seed Breez = SEMPRE
+  /// Mesmo após desinstalar e reinstalar o app!
+  /// 
+  /// Processo:
+  /// 1. Faz HMAC-SHA512 da chave com salt "bro-wallet-seed"
+  /// 2. Usa os primeiros 16 bytes (128 bits) como entropia
+  /// 3. Converte entropia em mnemonic BIP-39 de 12 palavras
+  String deriveSeedFromNostrKey(String privateKeyHex) {
+    // Validar chave
+    if (privateKeyHex.length != 64) {
+      throw Exception('Chave privada inválida: deve ter 64 caracteres hex');
+    }
+    
+    final privateKeyBytes = Uint8List.fromList(hex.decode(privateKeyHex));
+    
+    // Usar HMAC-SHA512 com salt específico para gerar entropia determinística
+    // O salt garante que não colidamos com outras derivações
+    final hmac = HMac(SHA512Digest(), 128);
+    final salt = utf8.encode('bro-wallet-seed-v1') as Uint8List;
+    hmac.init(KeyParameter(salt));
+    
+    final output = Uint8List(64);
+    hmac.update(privateKeyBytes, 0, privateKeyBytes.length);
+    hmac.doFinal(output, 0);
+    
+    // Usar os primeiros 16 bytes (128 bits) como entropia para seed de 12 palavras
+    final entropy = output.sublist(0, 16);
+    
+    // Converter entropia em mnemonic BIP-39
+    final mnemonic = bip39.entropyToMnemonic(hex.encode(entropy));
+    
+    return mnemonic;
+  }
+  
+  /// Verifica se uma seed foi derivada de uma chave Nostr
+  /// Útil para confirmar que a seed correta está sendo usada
+  bool verifySeedMatchesKey(String privateKeyHex, String mnemonic) {
+    try {
+      final derivedMnemonic = deriveSeedFromNostrKey(privateKeyHex);
+      return derivedMnemonic == mnemonic;
+    } catch (e) {
+      return false;
+    }
+  }
 }
 
 /// Chave estendida BIP-32

@@ -2,6 +2,7 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:nostr/nostr.dart';
 import '../services/nostr_service.dart';
 import '../services/nostr_profile_service.dart';
 import '../services/storage_service.dart';
@@ -597,6 +598,11 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
+      // DIAGNÓSTICO: Mostrar todos os dados de seed antes do login
+      debugPrint('');
+      debugPrint('🔍 DIAGNÓSTICO PRÉ-LOGIN:');
+      await _storage.debugShowAllSeeds();
+      
       String privateKey;
       String publicKey;
       String? mnemonic;
@@ -632,23 +638,42 @@ class _LoginScreenState extends State<LoginScreen> {
           throw Exception('Input inválido. Use:\n- Seed de 12 palavras (NIP-06)\n- Chave privada hex (64 chars)\n- nsec...');
         }
         
-        privateKey = input;
-        publicKey = _nostrService.getPublicKey(privateKey);
+        // Normalizar chave para hex (pode vir como nsec)
+        // Usar Keychain para converter nsec -> hex
+        final keychain = Keychain(input);
+        privateKey = keychain.private; // Sempre retorna hex
+        publicKey = keychain.public;
         
-        // PRIMEIRO: Tentar recuperar seed EXISTENTE vinculada a este pubkey
-        final existingSeed = await _storage.getBreezMnemonic(forPubkey: publicKey);
+        debugPrint('🔑 Chave normalizada para hex: ${privateKey.substring(0, 16)}...');
+        
+        // PRIORIDADE: Seed salva > Seed derivada
+        // Isso permite que Login Avançado vincule uma seed específica
+        debugPrint('');
+        debugPrint('═══════════════════════════════════════════════════════════');
+        debugPrint('🔍 BUSCANDO SEED para pubkey: ${publicKey.substring(0, 16)}...');
+        debugPrint('═══════════════════════════════════════════════════════════');
+        
+        // PRIMEIRO: Verificar se existe seed salva (vinculada via Login Avançado)
+        String? existingSeed = await _storage.getBreezMnemonic(forPubkey: publicKey);
+        
         if (existingSeed != null) {
           mnemonic = existingSeed;
-          debugPrint('✅ Seed EXISTENTE encontrada para ${publicKey.substring(0, 16)}...');
-          debugPrint('   Seed: ${existingSeed.split(' ').take(2).join(' ')}... (${existingSeed.split(' ').length} palavras)');
-        } else if (_generatedWalletSeed != null) {
-          // Se geramos uma seed junto com a chave, usar ela
-          mnemonic = _generatedWalletSeed;
-          debugPrint('💰 Usando seed de carteira gerada junto com chave');
+          debugPrint('✅ Seed SALVA encontrada (Login Avançado ou anterior)');
+          debugPrint('   Seed: ${existingSeed.split(' ').take(2).join(' ')}...');
         } else {
-          debugPrint('⚠️ Nenhuma seed existente para este pubkey - será criada nova pelo Breez');
+          // SEGUNDO: Derivar deterministicamente da chave Nostr
+          debugPrint('📭 Nenhuma seed salva. Derivando da chave Nostr...');
+          try {
+            mnemonic = _nip06Service.deriveSeedFromNostrKey(privateKey);
+            debugPrint('✅ Seed DERIVADA com sucesso!');
+            debugPrint('   Seed: ${mnemonic!.split(' ').take(2).join(' ')}...');
+            debugPrint('   (Use Login Avançado para vincular outra seed)');
+          } catch (e) {
+            debugPrint('❌ Erro ao derivar seed: $e');
+          }
         }
-        // Caso contrário, seed será recuperada do storage ou gerada pelo BreezProvider
+        debugPrint('═══════════════════════════════════════════════════════════');
+        debugPrint('');
       }
 
       debugPrint('✅ Login com Nostr. Pubkey: ${publicKey.substring(0, 16)}...');

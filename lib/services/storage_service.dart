@@ -107,6 +107,9 @@ class StorageService {
   // Seeds são salvas com chave baseada no pubkey do usuário.
   // Isso garante que NUNCA uma seed seja compartilhada entre usuários!
   
+  // BACKUP MASTER: Salva a seed em local fixo para NUNCA perder
+  static const String _masterSeedKey = 'MASTER_SEED_BACKUP';
+  
   /// Gera a chave de armazenamento para a seed de um usuário específico
   String _getSeedKeyForUser(String pubkey) {
     return 'breez_seed_${pubkey.substring(0, 16)}';
@@ -186,14 +189,94 @@ class StorageService {
     final obfuscated = _obfuscateSeed(mnemonic);
     await _prefs?.setString(backupKey, obfuscated);
     
-    debugPrint('🔐 Seed ÚNICA salva para usuário: ${pubkey.substring(0, 16)}...');
-    debugPrint('   Chave: $seedKey (${mnemonic.split(" ").length} palavras)');
+    // BACKUP 3: MASTER SEED - nunca é apagado, usado como último recurso
+    await _secureStorage.write(key: _masterSeedKey, value: mnemonic);
+    await _prefs?.setString('MASTER_SEED_PREFS', obfuscated);
+    
+    // BACKUP 4: Salvar também com chave legada para compatibilidade
+    await _secureStorage.write(key: 'breez_mnemonic', value: mnemonic);
+    
+    debugPrint('🔐 Seed salva em 4 locais para usuário: ${pubkey.substring(0, 16)}...');
+    debugPrint('   1. SecureStorage[$seedKey]');
+    debugPrint('   2. SharedPrefs[$backupKey]');  
+    debugPrint('   3. MASTER_SEED_BACKUP');
+    debugPrint('   4. breez_mnemonic (legado)');
+    debugPrint('   Seed: ${mnemonic.split(' ').take(2).join(' ')}...');
   }
   
   /// Força a troca de seed (usado nas configurações avançadas)
   Future<void> forceUpdateBreezMnemonic(String mnemonic, {String? ownerPubkey}) async {
     debugPrint('⚠️ FORÇANDO atualização de seed...');
     await saveBreezMnemonic(mnemonic, ownerPubkey: ownerPubkey, forceOverwrite: true);
+  }
+  
+  /// DIAGNÓSTICO: Mostra TODOS os locais de seed disponíveis
+  /// Útil para debug quando seed não está sendo encontrada
+  Future<void> debugShowAllSeeds() async {
+    if (_prefs == null) await init();
+    
+    debugPrint('');
+    debugPrint('╔═══════════════════════════════════════════════════════════╗');
+    debugPrint('║          DIAGNÓSTICO COMPLETO DE SEEDS                    ║');
+    debugPrint('╚═══════════════════════════════════════════════════════════╝');
+    
+    // SecureStorage keys
+    final secureKeys = ['breez_mnemonic', 'MASTER_SEED_BACKUP'];
+    for (final key in secureKeys) {
+      final value = await _secureStorage.read(key: key);
+      if (value != null && value.isNotEmpty) {
+        debugPrint('🔒 SecureStorage[$key]: ${value.split(' ').take(2).join(' ')}... (${value.split(' ').length} palavras)');
+      } else {
+        debugPrint('❌ SecureStorage[$key]: VAZIO');
+      }
+    }
+    
+    // SharedPreferences keys
+    final allKeys = _prefs?.getKeys() ?? {};
+    debugPrint('');
+    debugPrint('📋 SharedPreferences (${allKeys.length} chaves):');
+    
+    for (final key in allKeys.where((k) => 
+        k.startsWith('bm_backup_') || 
+        k.startsWith('breez_seed_') ||
+        k.contains('seed') ||
+        k.contains('mnemonic') ||
+        k == 'MASTER_SEED_PREFS')) {
+      final value = _prefs?.getString(key);
+      if (value != null) {
+        // Tentar deofuscar
+        final deobfuscated = _deobfuscateSeed(value);
+        if (deobfuscated.isNotEmpty && deobfuscated.split(' ').length == 12) {
+          debugPrint('   ✅ $key: ${deobfuscated.split(' ').take(2).join(' ')}...');
+        } else {
+          debugPrint('   📦 $key: [ofuscado ou inválido]');
+        }
+      }
+    }
+    
+    // Pubkey atual
+    final pubkey = await getNostrPublicKey();
+    debugPrint('');
+    debugPrint('👤 Pubkey atual: ${pubkey?.substring(0, 16) ?? "NULL"}...');
+    
+    if (pubkey != null) {
+      final userSeedKey = _getSeedKeyForUser(pubkey);
+      final userBackupKey = _getSeedBackupKeyForUser(pubkey);
+      
+      final userSeed = await _secureStorage.read(key: userSeedKey);
+      debugPrint('   🔒 $userSeedKey: ${userSeed != null ? "${userSeed.split(' ').take(2).join(' ')}..." : "NULL"}');
+      
+      final userBackup = _prefs?.getString(userBackupKey);
+      if (userBackup != null) {
+        final deobfuscated = _deobfuscateSeed(userBackup);
+        debugPrint('   📋 $userBackupKey: ${deobfuscated.isNotEmpty ? "${deobfuscated.split(' ').take(2).join(' ')}..." : "INVÁLIDO"}');
+      } else {
+        debugPrint('   📋 $userBackupKey: NULL');
+      }
+    }
+    
+    debugPrint('╔═══════════════════════════════════════════════════════════╝');
+    debugPrint('');
   }
   
   /// Retorna o pubkey do dono da seed atual (se houver)
@@ -213,98 +296,118 @@ class StorageService {
   }
 
   /// Retorna a seed do usuário atual (ou de um pubkey específico)
-  /// CRÍTICO: Retorna apenas a seed DO USUÁRIO LOGADO!
+  /// BUSCA EM TODOS OS LOCAIS POSSÍVEIS para nunca perder a seed!
   Future<String?> getBreezMnemonic({String? forPubkey}) async {
     if (_prefs == null) await init();
     
     // Usar pubkey fornecido ou do usuário atual
     final pubkey = forPubkey ?? await getNostrPublicKey();
     
-    if (pubkey == null || pubkey.isEmpty) {
-      debugPrint('⚠️ getBreezMnemonic: Nenhum usuário logado');
-      return null;
-    }
+    debugPrint('');
+    debugPrint('═══════════════════════════════════════════════════════════');
+    debugPrint('🔍 BUSCANDO SEED - Pubkey: ${pubkey?.substring(0, 16) ?? "NULL"}...');
+    debugPrint('═══════════════════════════════════════════════════════════');
     
-    final seedKey = _getSeedKeyForUser(pubkey);
-    final backupKey = _getSeedBackupKeyForUser(pubkey);
+    String? mnemonic;
     
-    debugPrint('🔍 Buscando seed para usuário: ${pubkey.substring(0, 16)}...');
-    debugPrint('   Chave de busca: $seedKey');
-    debugPrint('   Backup key: $backupKey');
-    
-    // DEBUG: Listar todas as seeds salvas
-    final allKeys = _prefs?.getKeys() ?? {};
-    final seedKeys = allKeys.where((k) => k.startsWith('bm_backup_') || k.startsWith('breez_seed_')).toList();
-    debugPrint('📦 Seeds salvas no storage: $seedKeys');
-    
-    // TENTAR 1: SecureStorage (preferido)
-    String? mnemonic = await _secureStorage.read(key: seedKey);
-    debugPrint('   SecureStorage[$seedKey]: ${mnemonic != null ? "${mnemonic.split(' ').take(2).join(' ')}... (${mnemonic.split(' ').length} palavras)" : "NULL"}');
-    
-    if (mnemonic != null && mnemonic.isNotEmpty && mnemonic.split(' ').length == 12) {
-      debugPrint('✅ Seed encontrada no SecureStorage para este usuário');
-      return mnemonic;
-    }
-    
-    // TENTAR 2: SharedPreferences backup
-    final backupObfuscated = _prefs?.getString(backupKey);
-    debugPrint('   SharedPrefs[$backupKey]: ${backupObfuscated != null ? "EXISTE" : "NULL"}');
-    if (backupObfuscated != null && backupObfuscated.isNotEmpty) {
-      mnemonic = _deobfuscateSeed(backupObfuscated);
-      if (mnemonic.isNotEmpty && mnemonic.split(' ').length == 12) {
-        debugPrint('✅ Seed recuperada do backup para este usuário');
-        // Restaurar no SecureStorage
-        await _secureStorage.write(key: seedKey, value: mnemonic);
+    // FONTE 1: SecureStorage com chave do usuário
+    if (pubkey != null) {
+      final seedKey = _getSeedKeyForUser(pubkey);
+      mnemonic = await _secureStorage.read(key: seedKey);
+      debugPrint('   [1] SecureStorage[$seedKey]: ${mnemonic != null ? "${mnemonic.split(' ').take(2).join(' ')}..." : "NULL"}');
+      if (mnemonic != null && mnemonic.split(' ').length == 12) {
+        debugPrint('✅ FONTE 1: Seed encontrada!');
         return mnemonic;
       }
     }
     
-    // TENTAR 3: Migrar seed antiga (global) se este é o primeiro usuário
-    final legacySeed = await _migrateLegacySeedIfNeeded(pubkey);
-    if (legacySeed != null) {
-      return legacySeed;
+    // FONTE 2: SharedPreferences backup do usuário
+    if (pubkey != null) {
+      final backupKey = _getSeedBackupKeyForUser(pubkey);
+      final backupObfuscated = _prefs?.getString(backupKey);
+      debugPrint('   [2] SharedPrefs[$backupKey]: ${backupObfuscated != null ? "EXISTE" : "NULL"}');
+      if (backupObfuscated != null && backupObfuscated.isNotEmpty) {
+        mnemonic = _deobfuscateSeed(backupObfuscated);
+        if (mnemonic.isNotEmpty && mnemonic.split(' ').length == 12) {
+          debugPrint('✅ FONTE 2: Seed encontrada no backup!');
+          // Restaurar no SecureStorage
+          if (pubkey != null) {
+            await _secureStorage.write(key: _getSeedKeyForUser(pubkey), value: mnemonic);
+          }
+          return mnemonic;
+        }
+      }
     }
     
-    debugPrint('❌ Nenhuma seed encontrada para este usuário - precisa gerar nova!');
+    // FONTE 3: MASTER SEED BACKUP (nunca é apagado)
+    mnemonic = await _secureStorage.read(key: _masterSeedKey);
+    debugPrint('   [3] MASTER_SEED_BACKUP: ${mnemonic != null ? "${mnemonic.split(' ').take(2).join(' ')}..." : "NULL"}');
+    if (mnemonic != null && mnemonic.split(' ').length == 12) {
+      debugPrint('✅ FONTE 3: Seed encontrada no MASTER BACKUP!');
+      // Salvar para o usuário atual
+      if (pubkey != null) {
+        await _secureStorage.write(key: _getSeedKeyForUser(pubkey), value: mnemonic);
+      }
+      return mnemonic;
+    }
+    
+    // FONTE 4: SharedPrefs MASTER
+    final masterPrefs = _prefs?.getString('MASTER_SEED_PREFS');
+    debugPrint('   [4] MASTER_SEED_PREFS: ${masterPrefs != null ? "EXISTE" : "NULL"}');
+    if (masterPrefs != null && masterPrefs.isNotEmpty) {
+      mnemonic = _deobfuscateSeed(masterPrefs);
+      if (mnemonic.isNotEmpty && mnemonic.split(' ').length == 12) {
+        debugPrint('✅ FONTE 4: Seed encontrada no MASTER PREFS!');
+        return mnemonic;
+      }
+    }
+    
+    // FONTE 4.5: Emergency backup
+    final emergencyBackup = _prefs?.getString('SEED_BACKUP_EMERGENCY');
+    debugPrint('   [4.5] SEED_BACKUP_EMERGENCY: ${emergencyBackup != null ? "EXISTE" : "NULL"}');
+    if (emergencyBackup != null && emergencyBackup.isNotEmpty) {
+      mnemonic = _deobfuscateSeed(emergencyBackup);
+      if (mnemonic.isNotEmpty && mnemonic.split(' ').length == 12) {
+        debugPrint('✅ FONTE 4.5: Seed encontrada no EMERGENCY BACKUP!');
+        return mnemonic;
+      }
+    }
+    
+    // FONTE 5: Seed legada global
+    mnemonic = await _secureStorage.read(key: 'breez_mnemonic');
+    debugPrint('   [5] breez_mnemonic (legado): ${mnemonic != null ? "${mnemonic.split(' ').take(2).join(' ')}..." : "NULL"}');
+    if (mnemonic != null && mnemonic.split(' ').length == 12) {
+      debugPrint('✅ FONTE 5: Seed encontrada no formato legado!');
+      return mnemonic;
+    }
+    
+    // FONTE 6: Qualquer backup bm_backup_*
+    final allKeys = _prefs?.getKeys() ?? {};
+    debugPrint('   [6] Buscando em ${allKeys.length} chaves do SharedPrefs...');
+    for (final key in allKeys) {
+      if (key.startsWith('bm_backup_')) {
+        final obfuscated = _prefs?.getString(key);
+        if (obfuscated != null) {
+          mnemonic = _deobfuscateSeed(obfuscated);
+          if (mnemonic.isNotEmpty && mnemonic.split(' ').length == 12) {
+            debugPrint('✅ FONTE 6: Seed encontrada em $key!');
+            debugPrint('   Seed: ${mnemonic.split(' ').take(2).join(' ')}...');
+            return mnemonic;
+          }
+        }
+      }
+    }
+    
+    debugPrint('❌ NENHUMA SEED encontrada em NENHUM local!');
+    debugPrint('═══════════════════════════════════════════════════════════');
+    debugPrint('');
     return null;
   }
   
   /// Migra seed antiga (formato global) para o novo formato por usuário
   /// Só acontece UMA VEZ para compatibilidade com versões anteriores
   Future<String?> _migrateLegacySeedIfNeeded(String pubkey) async {
-    // Verificar se já migrou
-    final migrated = _prefs?.getBool('seed_migrated_v2') ?? false;
-    if (migrated) return null;
-    
-    debugPrint('🔄 Verificando seed legada para migração...');
-    
-    // Tentar ler seed antiga (formato global)
-    String? legacySeed = await _secureStorage.read(key: 'breez_mnemonic');
-    
-    if (legacySeed == null || legacySeed.isEmpty) {
-      // Tentar backup antigo
-      final legacyBackup = _prefs?.getString('bm_backup_v1');
-      if (legacyBackup != null && legacyBackup.isNotEmpty) {
-        legacySeed = _deobfuscateSeed(legacyBackup);
-      }
-    }
-    
-    if (legacySeed != null && legacySeed.isNotEmpty && legacySeed.split(' ').length == 12) {
-      // Verificar se a seed antiga pertencia a este usuário
-      final legacyOwner = _prefs?.getString('bm_owner_pubkey');
-      
-      if (legacyOwner == pubkey) {
-        debugPrint('✅ Migrando seed legada para novo formato (mesmo usuário)');
-        await saveBreezMnemonic(legacySeed, ownerPubkey: pubkey);
-        await _prefs?.setBool('seed_migrated_v2', true);
-        return legacySeed;
-      } else {
-        debugPrint('⚠️ Seed legada pertence a outro usuário - não migrar');
-        // Marcar como migrado para não tentar de novo
-        await _prefs?.setBool('seed_migrated_v2', true);
-      }
-    }
-    
+    // Esta função agora é menos necessária pois getBreezMnemonic já busca tudo
     return null;
   }
   
@@ -409,17 +512,42 @@ class StorageService {
   Future<void> logout() async {
     if (_prefs == null) await init();
     
-    // Preservar seeds de TODOS os usuários antes de limpar
+    debugPrint('');
+    debugPrint('═══════════════════════════════════════════════════════════');
+    debugPrint('🚪 LOGOUT - Preservando TODAS as seeds...');
+    debugPrint('═══════════════════════════════════════════════════════════');
+    
+    // PRIMEIRO: Garantir que a seed atual está salva em TODOS os backups
+    final currentSeed = await getBreezMnemonic();
+    if (currentSeed != null && currentSeed.split(' ').length == 12) {
+      debugPrint('   🔐 Fazendo backup extra da seed atual antes do logout...');
+      debugPrint('   Seed: ${currentSeed.split(' ').take(2).join(' ')}...');
+      
+      // Salvar em TODOS os locais de backup
+      await _secureStorage.write(key: _masterSeedKey, value: currentSeed);
+      await _secureStorage.write(key: 'breez_mnemonic', value: currentSeed);
+      
+      final obfuscated = _obfuscateSeed(currentSeed);
+      await _prefs?.setString('MASTER_SEED_PREFS', obfuscated);
+      await _prefs?.setString('SEED_BACKUP_EMERGENCY', obfuscated);
+    }
+    
+    // Preservar TODAS as seeds e backups antes de limpar
     final allKeys = _prefs?.getKeys() ?? <String>{};
-    final seedBackups = <String, String>{};
+    final dataToPreserve = <String, String>{};
     
     for (final key in allKeys) {
-      // Preservar backups de seeds (formato: bm_backup_<pubkey>)
-      if (key.startsWith('bm_backup_')) {
+      // Preservar TUDO relacionado a seeds
+      if (key.startsWith('bm_backup_') || 
+          key.startsWith('breez_seed_') ||
+          key == 'MASTER_SEED_PREFS' ||
+          key == 'SEED_BACKUP_EMERGENCY' ||
+          key.contains('seed') ||
+          key.contains('mnemonic')) {
         final value = _prefs?.getString(key);
         if (value != null) {
-          seedBackups[key] = value;
-          debugPrint('💾 Preservando seed backup: $key');
+          dataToPreserve[key] = value;
+          debugPrint('   💾 Preservando: $key');
         }
       }
     }
@@ -427,12 +555,14 @@ class StorageService {
     // Limpar SharedPreferences
     await _prefs?.clear();
     
-    // Restaurar seeds
-    for (final entry in seedBackups.entries) {
+    // Restaurar dados preservados
+    for (final entry in dataToPreserve.entries) {
       await _prefs?.setString(entry.key, entry.value);
     }
     
-    debugPrint('🚪 Logout concluído - ${seedBackups.length} seeds preservadas');
+    debugPrint('✅ Logout concluído - ${dataToPreserve.length} itens preservados');
+    debugPrint('═══════════════════════════════════════════════════════════');
+    debugPrint('');
   }
 
   Future<void> clearAll() async {
