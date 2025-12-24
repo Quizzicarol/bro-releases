@@ -38,6 +38,61 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
     });
   }
 
+  /// Reconcilia automaticamente ordens com pagamentos da carteira
+  Future<void> _autoReconcileOrders(OrderProvider orderProvider, BreezProvider breezProvider) async {
+    try {
+      debugPrint('🔄 Iniciando reconciliação automática de ordens...');
+      
+      // Buscar todos os pagamentos da carteira
+      final payments = await breezProvider.getAllPayments();
+      
+      // Extrair paymentHashes de pagamentos recebidos com sucesso
+      final paidHashes = <String>{};
+      for (var p in payments) {
+        final status = p['status']?.toString() ?? '';
+        final hash = p['paymentHash']?.toString() ?? '';
+        
+        if (status.contains('completed') && hash.isNotEmpty && hash != 'N/A') {
+          paidHashes.add(hash);
+        }
+      }
+      
+      debugPrint('💰 ${paidHashes.length} pagamentos encontrados na carteira');
+      
+      // Verificar cada ordem
+      int updated = 0;
+      for (var order in orderProvider.orders) {
+        // Se a ordem tem paymentHash e está na lista de pagos
+        if (order.paymentHash != null && 
+            order.paymentHash!.isNotEmpty && 
+            paidHashes.contains(order.paymentHash)) {
+          
+          // Se o status não reflete o pagamento, atualizar
+          if (order.status == 'pending') {
+            debugPrint('✅ Ordem ${order.id} foi PAGA! Atualizando status...');
+            await orderProvider.updateOrderStatus(orderId: order.id, status: 'payment_received');
+            updated++;
+          }
+        } else if (order.paymentHash != null && 
+                   order.paymentHash!.isNotEmpty && 
+                   !paidHashes.contains(order.paymentHash) &&
+                   order.status == 'payment_received') {
+          // Ordem marcada como paga mas não está na carteira - pode ser erro
+          debugPrint('⚠️ Ordem ${order.id} marcada como paga mas NÃO encontrada na carteira!');
+        }
+      }
+      
+      if (updated > 0) {
+        debugPrint('🎉 $updated ordens atualizadas automaticamente!');
+        // Recarregar ordens para refletir mudanças
+        await orderProvider.fetchOrders();
+      }
+      
+    } catch (e) {
+      debugPrint('⚠️ Erro na reconciliação automática: $e');
+    }
+  }
+
   /// Carrega ordens e tenta reconciliar automaticamente pagamentos recebidos
   Future<void> _loadOrdersWithAutoReconcile() async {
     if (!mounted) return;
@@ -54,39 +109,9 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
       // Sincronizar com Nostr primeiro
       await orderProvider.fetchOrders();
       
-      // RECONCILIAÇÃO AUTOMÁTICA: Verificar se há ordens pendentes COM paymentHash que foram pagas
-      // IMPORTANTE: Só reconciliar ordens que têm paymentHash (invoice foi gerada)
-      final pendingOrdersWithHash = orderProvider.orders.where((o) => 
-        o.status == 'pending' && 
-        o.paymentHash != null && 
-        o.paymentHash!.isNotEmpty
-      ).toList();
-      
-      if (pendingOrdersWithHash.isNotEmpty && breezProvider.isInitialized) {
-        debugPrint('🔄 Auto-reconciliando ${pendingOrdersWithHash.length} ordens pendentes com paymentHash...');
-        
-        try {
-          final payments = await breezProvider.listPayments();
-          
-          // Converter para formato esperado - INCLUIR paymentHash
-          final paymentsWithDetails = payments.map((p) {
-            return {
-              'amount': int.tryParse(p['amount']?.toString() ?? '0') ?? 0,
-              'paymentHash': p['paymentHash'] as String?,
-            };
-          }).toList();
-          
-          if (paymentsWithDetails.isNotEmpty) {
-            final reconciled = await orderProvider.reconcilePendingOrdersWithBreez(paymentsWithDetails);
-            if (reconciled > 0) {
-              debugPrint('✅ Auto-reconciliadas $reconciled ordens!');
-            }
-          }
-        } catch (e) {
-          debugPrint('⚠️ Erro ao auto-reconciliar: $e');
-        }
-      } else {
-        debugPrint('ℹ️ Nenhuma ordem pendente com paymentHash para reconciliar');
+      // RECONCILIAÇÃO AUTOMÁTICA COMPLETA
+      if (breezProvider.isInitialized) {
+        await _autoReconcileOrders(orderProvider, breezProvider);
       }
       
       debugPrint('📱 OrderProvider tem ${orderProvider.orders.length} ordens no total');
@@ -1227,18 +1252,6 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
         title: const Text('Minhas Ordens'),
         backgroundColor: Colors.blue,
         actions: [
-          // Botão para diagnóstico de pagamentos
-          IconButton(
-            icon: const Icon(Icons.bug_report),
-            onPressed: _showPaymentDiagnostic,
-            tooltip: 'Diagnóstico de pagamentos',
-          ),
-          // Botão para verificar pagamentos pendentes
-          IconButton(
-            icon: const Icon(Icons.sync),
-            onPressed: _checkPendingPayments,
-            tooltip: 'Verificar pagamentos',
-          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadOrders,

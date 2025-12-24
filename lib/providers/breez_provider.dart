@@ -118,81 +118,57 @@ class BreezProvider with ChangeNotifier {
       // Isso garante que: mesma conta Nostr = mesmo saldo Bitcoin = SEMPRE!
       
       if (mnemonic != null) {
-        // Seed fornecida explicitamente (recuperação manual ou NIP-06)
-        // CRÍTICO: Verificar se já existe uma seed para este usuário
-        final existingSeed = await StorageService().getBreezMnemonic();
+        // Seed fornecida explicitamente (derivada da chave Nostr ou NIP-06)
+        // USAR SEMPRE A SEED FORNECIDA - ela é determinística!
+        _mnemonic = mnemonic;
+        _isNewWallet = false;
         
-        if (existingSeed != null && existingSeed.isNotEmpty && existingSeed.split(' ').length == 12) {
-          // JÁ EXISTE seed - usar a EXISTENTE, não sobrescrever!
-          final existingWords = existingSeed.split(' ').take(2).join(' ');
-          final newWords = mnemonic.split(' ').take(2).join(' ');
-          
-          if (existingWords != newWords) {
-            debugPrint('⚠️ CONFLITO DE SEEDS DETECTADO!');
-            debugPrint('   Seed existente: $existingWords...');
-            debugPrint('   Seed fornecida: $newWords...');
-            debugPrint('   USANDO SEED EXISTENTE para preservar fundos!');
-            debugPrint('   (Para mudar, vá em Configurações > Backup NIP-06)');
-          }
-          _mnemonic = existingSeed;
-          _isNewWallet = false;
-          debugPrint('🔑 Usando seed EXISTENTE do usuário');
-        } else {
-          // Não existe seed - salvar a nova (SEM forceOverwrite para proteger)
-          _mnemonic = mnemonic;
-          // Verificar novamente se existe seed (proteção extra)
-          final doubleCheck = await StorageService().getBreezMnemonic();
-          if (doubleCheck == null || doubleCheck.isEmpty) {
-            await StorageService().saveBreezMnemonic(_mnemonic!);
-            debugPrint('🔑 Primeira seed salva para este usuário');
-          } else {
-            _mnemonic = doubleCheck;
-            debugPrint('🔑 Seed já existia, usando ela');
-          }
-          _isNewWallet = false;
-        }
+        // Salvar a seed (se já existir igual, não faz nada)
+        await StorageService().saveBreezMnemonic(_mnemonic!);
+        
+        debugPrint('🔑 Usando seed FORNECIDA: ${_mnemonic!.split(' ').take(2).join(' ')}...');
       } else {
         // Buscar seed salva para este usuário
-        debugPrint('🔍 Buscando seed do usuário atual...');
-        final savedMnemonic = await StorageService().getBreezMnemonic();
+        debugPrint('');
+        debugPrint('═══════════════════════════════════════════════════════════');
+        debugPrint('🔍 BREEZ: Buscando seed do usuário atual...');
+        debugPrint('═══════════════════════════════════════════════════════════');
+        
+        // BUSCA 1: Com pubkey do usuário atual
+        String? savedMnemonic = await StorageService().getBreezMnemonic();
+        
+        // BUSCA 2: Se não encontrou, tentar buscar pubkey e buscar novamente
+        if (savedMnemonic == null || savedMnemonic.isEmpty) {
+          debugPrint('⚠️ Primeira busca falhou. Tentando obter pubkey manualmente...');
+          final pubkey = await StorageService().getNostrPublicKey();
+          if (pubkey != null) {
+            debugPrint('   Pubkey encontrado: ${pubkey.substring(0, 16)}...');
+            savedMnemonic = await StorageService().getBreezMnemonic(forPubkey: pubkey);
+          }
+        }
         
         if (savedMnemonic != null && savedMnemonic.isNotEmpty && savedMnemonic.split(' ').length == 12) {
           _mnemonic = savedMnemonic;
           _isNewWallet = false;
-          debugPrint('✅ Seed EXISTENTE encontrada para este usuário!');
+          debugPrint('✅ Seed EXISTENTE encontrada!');
+          debugPrint('   Seed: ${savedMnemonic.split(' ').take(2).join(' ')}...');
         } else {
-          // ATENÇÃO: Nenhuma seed salva para este usuário!
-          // NÃO geramos automaticamente - isso causaria perda de fundos!
-          // O usuário PRECISA restaurar via NIP-06 ou configurar uma seed.
-          debugPrint('⚠️ ATENÇÃO: Nenhuma seed encontrada para este usuário!');
-          debugPrint('⚠️ Uma nova seed será gerada - se você tinha fundos em outra seed,');
-          debugPrint('⚠️ vá em Configurações > Backup NIP-06 para restaurar!');
-          
-          // ÚLTIMA VERIFICAÇÃO: Buscar seed com pubkey explícito
-          final pubkey = await StorageService().getNostrPublicKey();
-          if (pubkey != null) {
-            final seedByPubkey = await StorageService().getBreezMnemonic(forPubkey: pubkey);
-            if (seedByPubkey != null && seedByPubkey.isNotEmpty && seedByPubkey.split(' ').length == 12) {
-              _mnemonic = seedByPubkey;
-              _isNewWallet = false;
-              debugPrint('✅ Seed encontrada via pubkey: ${seedByPubkey.split(' ').take(2).join(' ')}...');
-            } else {
-              // Realmente não existe seed - gerar nova
-              _mnemonic = bip39.generateMnemonic();
-              await StorageService().saveBreezMnemonic(_mnemonic!);
-              _isNewWallet = true;
-              _seedRecoveryNeeded = true;
-              debugPrint('🆕 Nova seed gerada (nenhuma encontrada)');
-            }
-          } else {
-            // Sem pubkey - gerar nova
-            _mnemonic = bip39.generateMnemonic();
-            await StorageService().saveBreezMnemonic(_mnemonic!);
-            _isNewWallet = true;
-            _seedRecoveryNeeded = true;
-            debugPrint('🆕 Nova seed gerada (sem pubkey)');
-          }
+          // ÚLTIMA TENTATIVA: O getBreezMnemonic agora busca em 6 fontes diferentes
+          // Se chegou aqui, realmente não existe seed
+          debugPrint('');
+          debugPrint('⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️');
+          debugPrint('🆕 NENHUMA SEED encontrada em NENHUM local!');
+          debugPrint('   Gerando NOVA seed...');
+          debugPrint('   Se você tinha saldo, precisa IMPORTAR a seed!');
+          debugPrint('⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️');
+          debugPrint('');
+          _mnemonic = bip39.generateMnemonic();
+          await StorageService().saveBreezMnemonic(_mnemonic!);
+          _isNewWallet = true;
+          _seedRecoveryNeeded = true;
+          debugPrint('🆕 Nova seed: ${_mnemonic!.split(' ').take(2).join(' ')}...');
         }
+        debugPrint('═══════════════════════════════════════════════════════════');
       }
 
       // DEBUG: Mostrar primeiras 2 palavras da seed para confirmar
