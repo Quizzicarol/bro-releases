@@ -750,7 +750,7 @@ class _HomeScreenState extends State<HomeScreen> {
         StatCard(
           emoji: '⏳',
           value: '$pendingBills',
-          label: 'Aguardando Pagamento',
+          label: 'Aguardando Bro',
         ),
         StatCard(
           emoji: '✅',
@@ -875,9 +875,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String _getStatusLabel(String status) {
     switch (status.toLowerCase()) {
       case 'pending':
-        return 'Aguardando Pagamento';
+        return 'Aguardando Bro';
       case 'payment_received':
-        return 'Pagamento Recebido';
+        return 'Saldo Reservado';
       case 'confirmed':
         return 'Aguardando Bro';
       case 'accepted':

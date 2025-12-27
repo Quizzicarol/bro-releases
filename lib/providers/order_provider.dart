@@ -260,6 +260,8 @@ class OrderProvider with ChangeNotifier {
     }
   }
 
+  /// Expirar ordens pendentes antigas (> 2 horas sem aceite)
+  /// Ordens que ficam muito tempo pendentes provavelmente foram abandonadas
   // Salvar ordens no SharedPreferences (SEMPRE salva, não só em testMode)
   Future<void> _saveOrders() async {
     try {
@@ -476,27 +478,106 @@ class OrderProvider with ChangeNotifier {
     }
   }
 
-  // Listar ordens
-  Future<void> fetchOrders({String? status}) async {
-    // SEMPRE sincronizar com Nostr (modo P2P)
-    debugPrint('📦 Sincronizando ordens com Nostr...');
+  // Listar ordens (para usuário normal ou provedor)
+  Future<void> fetchOrders({String? status, bool forProvider = false}) async {
+    debugPrint('📦 Sincronizando ordens com Nostr... (forProvider: $forProvider)');
     _isLoading = true;
     notifyListeners();
     
     try {
-      // Timeout de 10s para não travar a UI
-      await syncOrdersFromNostr().timeout(
-        const Duration(seconds: 10),
-        onTimeout: () {
-          debugPrint('⏰ Timeout na sincronização Nostr, usando ordens locais');
-        },
-      );
+      if (forProvider) {
+        // MODO PROVEDOR: Buscar TODAS as ordens pendentes de TODOS os usuários
+        await syncAllPendingOrdersFromNostr().timeout(
+          const Duration(seconds: 15),
+          onTimeout: () {
+            debugPrint('⏰ Timeout na sincronização Nostr (modo provedor), usando ordens locais');
+          },
+        );
+      } else {
+        // MODO USUÁRIO: Buscar apenas ordens do próprio usuário
+        await syncOrdersFromNostr().timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            debugPrint('⏰ Timeout na sincronização Nostr, usando ordens locais');
+          },
+        );
+      }
       debugPrint('✅ Sincronização com Nostr concluída (${_orders.length} ordens)');
     } catch (e) {
       debugPrint('❌ Erro ao sincronizar com Nostr: $e');
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+  
+  /// Buscar TODAS as ordens pendentes do Nostr (para modo Provedor/Bro)
+  /// Isso permite que o Bro veja ordens de outros usuários
+  Future<void> syncAllPendingOrdersFromNostr() async {
+    try {
+      debugPrint('🔄 [PROVEDOR] Buscando TODAS as ordens pendentes do Nostr...');
+      
+      // Buscar todas as ordens pendentes (de qualquer usuário)
+      final allPendingOrders = await _nostrOrderService.fetchPendingOrders();
+      debugPrint('📦 Recebidas ${allPendingOrders.length} ordens pendentes do Nostr');
+      
+      // Log das ordens recebidas
+      for (var order in allPendingOrders) {
+        debugPrint('   📋 Ordem ${order.id.substring(0, 8)}: R\$ ${order.amount.toStringAsFixed(2)}, pubkey=${order.userPubkey?.substring(0, 8) ?? "?"}, status=${order.status}');
+      }
+      
+      // Mesclar com ordens locais (sem duplicar)
+      int added = 0;
+      int updated = 0;
+      for (var pendingOrder in allPendingOrders) {
+        // Ignorar ordens com amount=0
+        if (pendingOrder.amount <= 0) {
+          debugPrint('⚠️ IGNORANDO ordem ${pendingOrder.id.substring(0, 8)} com amount=0');
+          continue;
+        }
+        
+        final existingIndex = _orders.indexWhere((o) => o.id == pendingOrder.id);
+        if (existingIndex == -1) {
+          // Ordem não existe localmente, adicionar
+          _orders.add(pendingOrder);
+          added++;
+        } else {
+          // Atualizar se necessário
+          final existing = _orders[existingIndex];
+          if (pendingOrder.amount > 0 && existing.amount == 0) {
+            _orders[existingIndex] = existing.copyWith(
+              amount: pendingOrder.amount,
+              btcAmount: pendingOrder.btcAmount,
+              btcPrice: pendingOrder.btcPrice,
+              total: pendingOrder.total,
+              billCode: pendingOrder.billCode,
+            );
+            updated++;
+          }
+        }
+      }
+      
+      // Também buscar ordens do próprio usuário
+      if (_currentUserPubkey != null && _currentUserPubkey!.isNotEmpty) {
+        final userOrders = await _nostrOrderService.fetchUserOrders(_currentUserPubkey!);
+        for (var order in userOrders) {
+          final existingIndex = _orders.indexWhere((o) => o.id == order.id);
+          if (existingIndex == -1 && order.amount > 0) {
+            _orders.add(order);
+            added++;
+          }
+        }
+      }
+      
+      // Ordenar por data (mais recente primeiro)
+      _orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      
+      await _saveOrders();
+      notifyListeners();
+      
+      debugPrint('✅ [PROVEDOR] Sincronização concluída: ${_orders.length} ordens totais (added: $added, updated: $updated)');
+    } catch (e) {
+      debugPrint('❌ [PROVEDOR] Erro ao sincronizar ordens: $e');
     }
   }
 
@@ -632,6 +713,180 @@ class OrderProvider with ChangeNotifier {
     }
   }
 
+  /// Provedor aceita uma ordem - publica aceitação no Nostr e atualiza localmente
+  Future<bool> acceptOrderAsProvider(String orderId) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      // Buscar a ordem localmente primeiro
+      Order? order = getOrderById(orderId);
+      
+      // Se não encontrou localmente, buscar do Nostr
+      if (order == null) {
+        debugPrint('⚠️ Ordem $orderId não encontrada localmente, buscando no Nostr...');
+        
+        final orderData = await _nostrOrderService.fetchOrderFromNostr(orderId);
+        if (orderData != null) {
+          order = Order.fromJson(orderData);
+          // Adicionar à lista local para referência futura
+          _orders.add(order);
+          debugPrint('✅ Ordem encontrada no Nostr e adicionada localmente');
+        }
+      }
+      
+      if (order == null) {
+        debugPrint('❌ Ordem $orderId não encontrada em nenhum lugar');
+        _error = 'Ordem não encontrada';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      // Pegar chave privada do Nostr
+      final privateKey = _nostrService.privateKey;
+      if (privateKey == null) {
+        debugPrint('❌ Chave privada Nostr não disponível');
+        _error = 'Chave privada não disponível';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      final providerPubkey = _nostrService.publicKey;
+      debugPrint('🔄 Provedor $providerPubkey aceitando ordem $orderId...');
+
+      // Publicar aceitação no Nostr
+      final success = await _nostrOrderService.acceptOrderOnNostr(
+        order: order,
+        providerPrivateKey: privateKey,
+      );
+
+      if (!success) {
+        debugPrint('⚠️ Falha ao publicar aceitação no Nostr');
+        _error = 'Falha ao publicar aceitação no Nostr';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      // Atualizar localmente
+      final index = _orders.indexWhere((o) => o.id == orderId);
+      if (index != -1) {
+        _orders[index] = _orders[index].copyWith(
+          status: 'accepted',
+          providerId: providerPubkey,
+          acceptedAt: DateTime.now(),
+        );
+        
+        // Salvar localmente
+        final prefs = await SharedPreferences.getInstance();
+        final ordersJson = json.encode(_orders.map((o) => o.toJson()).toList());
+        await prefs.setString(_ordersKey, ordersJson);
+        
+        debugPrint('✅ Ordem $orderId aceita com sucesso');
+      }
+
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('❌ Erro ao aceitar ordem: $e');
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Provedor completa uma ordem - publica comprovante no Nostr e atualiza localmente
+  Future<bool> completeOrderAsProvider(String orderId, String proof) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      // Buscar a ordem localmente primeiro
+      Order? order = getOrderById(orderId);
+      
+      // Se não encontrou localmente, buscar do Nostr
+      if (order == null) {
+        debugPrint('⚠️ Ordem $orderId não encontrada localmente, buscando no Nostr...');
+        
+        final orderData = await _nostrOrderService.fetchOrderFromNostr(orderId);
+        if (orderData != null) {
+          order = Order.fromJson(orderData);
+          // Adicionar à lista local para referência futura
+          _orders.add(order);
+          debugPrint('✅ Ordem encontrada no Nostr e adicionada localmente');
+        }
+      }
+      
+      if (order == null) {
+        debugPrint('❌ Ordem $orderId não encontrada em nenhum lugar');
+        _error = 'Ordem não encontrada';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      // Pegar chave privada do Nostr
+      final privateKey = _nostrService.privateKey;
+      if (privateKey == null) {
+        debugPrint('❌ Chave privada Nostr não disponível');
+        _error = 'Chave privada não disponível';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      debugPrint('🔄 Completando ordem $orderId com comprovante...');
+
+      // Publicar conclusão no Nostr
+      final success = await _nostrOrderService.completeOrderOnNostr(
+        order: order,
+        providerPrivateKey: privateKey,
+        proofImageBase64: proof,
+      );
+
+      if (!success) {
+        debugPrint('⚠️ Falha ao publicar comprovante no Nostr');
+        _error = 'Falha ao publicar comprovante no Nostr';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      // Atualizar localmente
+      final index = _orders.indexWhere((o) => o.id == orderId);
+      if (index != -1) {
+        _orders[index] = _orders[index].copyWith(
+          status: 'awaiting_confirmation',
+          metadata: {
+            ...(_orders[index].metadata ?? {}),
+            'paymentProof': proof.length > 100 ? 'image_base64_stored' : proof,
+          },
+        );
+        
+        // Salvar localmente
+        final prefs = await SharedPreferences.getInstance();
+        final ordersJson = json.encode(_orders.map((o) => o.toJson()).toList());
+        await prefs.setString(_ordersKey, ordersJson);
+        
+        debugPrint('✅ Ordem $orderId completada, aguardando confirmação');
+      }
+
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('❌ Erro ao completar ordem: $e');
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   // Validar boleto
   Future<Map<String, dynamic>?> validateBoleto(String code) async {
     _isLoading = true;
@@ -700,18 +955,31 @@ class OrderProvider with ChangeNotifier {
   // Get order (alias para fetchOrder)
   Future<Map<String, dynamic>?> getOrder(String orderId) async {
     try {
-      // Em modo teste, buscar localmente
-      if (AppConfig.testMode) {
-        final order = _orders.firstWhere(
-          (o) => o.id == orderId,
-          orElse: () => throw Exception('Ordem não encontrada'),
-        );
-        return order.toJson();
+      debugPrint('🔍 getOrder: Buscando ordem $orderId');
+      debugPrint('🔍 getOrder: Total de ordens em memória: ${_orders.length}');
+      
+      // Primeiro, tentar encontrar na lista em memória (mais rápido)
+      final localOrder = _orders.cast<Order?>().firstWhere(
+        (o) => o?.id == orderId,
+        orElse: () => null,
+      );
+      
+      if (localOrder != null) {
+        debugPrint('✅ getOrder: Ordem encontrada em memória');
+        return localOrder.toJson();
       }
       
-      // Produção: buscar do backend
+      debugPrint('⚠️ getOrder: Ordem não encontrada em memória, tentando backend...');
+      
+      // Se não encontrou localmente, tentar buscar do backend
       final orderData = await _apiService.getOrder(orderId);
-      return orderData;
+      if (orderData != null) {
+        debugPrint('✅ getOrder: Ordem encontrada no backend');
+        return orderData;
+      }
+      
+      debugPrint('❌ getOrder: Ordem não encontrada em nenhum lugar');
+      return null;
     } catch (e) {
       _error = e.toString();
       debugPrint('❌ Erro ao buscar ordem $orderId: $e');
@@ -1151,91 +1419,6 @@ class OrderProvider with ChangeNotifier {
     return newIndex > currentIndex;
   }
 
-  /// Aceitar ordem como provider (publica evento de aceitação no Nostr)
-  Future<bool> acceptOrderAsProvider(String orderId) async {
-    final privateKey = _nostrService.privateKey;
-    if (privateKey == null) {
-      debugPrint('⚠️ Sem chave privada para aceitar ordem');
-      return false;
-    }
-    
-    try {
-      // Buscar ordem
-      final order = getOrderById(orderId);
-      if (order == null) {
-        debugPrint('⚠️ Ordem não encontrada: $orderId');
-        return false;
-      }
-      
-      // Publicar aceitação no Nostr
-      final success = await _nostrOrderService.acceptOrderOnNostr(
-        order: order,
-        providerPrivateKey: privateKey,
-      );
-      
-      if (success) {
-        // Atualizar localmente
-        await updateOrderStatus(
-          orderId: orderId,
-          status: 'accepted',
-          providerId: _currentUserPubkey,
-        );
-        debugPrint('✅ Ordem aceita: $orderId');
-        return true;
-      }
-      
-      return false;
-    } catch (e) {
-      debugPrint('❌ Erro ao aceitar ordem: $e');
-      return false;
-    }
-  }
-
-  /// Completar ordem como provider (publica prova no Nostr)
-  Future<bool> completeOrderAsProvider(String orderId, String proofImageBase64) async {
-    final privateKey = _nostrService.privateKey;
-    if (privateKey == null) {
-      debugPrint('⚠️ Sem chave privada para completar ordem');
-      return false;
-    }
-    
-    try {
-      // Buscar ordem
-      final order = getOrderById(orderId);
-      if (order == null) {
-        debugPrint('⚠️ Ordem não encontrada: $orderId');
-        return false;
-      }
-      
-      // Publicar prova no Nostr
-      final success = await _nostrOrderService.completeOrderOnNostr(
-        order: order,
-        providerPrivateKey: privateKey,
-        proofImageBase64: proofImageBase64,
-      );
-      
-      if (success) {
-        // Atualizar localmente - status vai para 'awaiting_confirmation'
-        // O status 'completed' só deve ser usado quando o USUÁRIO confirmar o pagamento
-        await updateOrderStatus(
-          orderId: orderId,
-          status: 'awaiting_confirmation',
-          metadata: {
-            'proofSentAt': DateTime.now().toIso8601String(),
-            'proofSentBy': _currentUserPubkey,
-          },
-        );
-        debugPrint('✅ Comprovante enviado, aguardando confirmação do usuário: $orderId');
-        return true;
-      }
-      
-      return false;
-    } catch (e) {
-      debugPrint('❌ Erro ao completar ordem: $e');
-      return false;
-    }
-  }
-
   /// Republicar ordens locais que não têm eventId no Nostr
   /// Útil para migrar ordens criadas antes da integração Nostr
   Future<int> republishLocalOrdersToNostr() async {
@@ -1282,5 +1465,415 @@ class OrderProvider with ChangeNotifier {
     
     debugPrint('📦 Total republicado: $republished ordens');
     return republished;
+  }
+
+  // ==================== AUTO RECONCILIATION ====================
+
+  /// Reconciliação automática de ordens baseada em pagamentos do Breez SDK
+  /// 
+  /// Esta função analisa TODOS os pagamentos (recebidos e enviados) e atualiza
+  /// os status das ordens automaticamente:
+  /// 
+  /// 1. Pagamentos RECEBIDOS → Atualiza ordens 'pending' para 'payment_received'
+  ///    (usado quando o Bro paga via Lightning - menos comum no fluxo atual)
+  /// 
+  /// 2. Pagamentos ENVIADOS → Atualiza ordens 'awaiting_confirmation' para 'completed'
+  ///    (quando o usuário liberou BTC para o Bro após confirmar prova de pagamento)
+  /// 
+  /// A identificação é feita por:
+  /// - paymentHash (se disponível) - mais preciso
+  /// - Valor aproximado + timestamp (fallback)
+  Future<Map<String, int>> autoReconcileWithBreezPayments(List<Map<String, dynamic>> breezPayments) async {
+    debugPrint('');
+    debugPrint('═══════════════════════════════════════════════════════════════');
+    debugPrint('🔄 RECONCILIAÇÃO AUTOMÁTICA DE ORDENS');
+    debugPrint('═══════════════════════════════════════════════════════════════');
+    
+    int pendingReconciled = 0;
+    int completedReconciled = 0;
+    
+    // Separar pagamentos por direção
+    final receivedPayments = breezPayments.where((p) {
+      final type = p['type']?.toString() ?? '';
+      final direction = p['direction']?.toString() ?? '';
+      return direction == 'RECEBIDO' || type.toLowerCase().contains('receive');
+    }).toList();
+    
+    final sentPayments = breezPayments.where((p) {
+      final type = p['type']?.toString() ?? '';
+      final direction = p['direction']?.toString() ?? '';
+      return direction == 'ENVIADO' || type.toLowerCase().contains('send');
+    }).toList();
+    
+    debugPrint('📥 ${receivedPayments.length} pagamentos RECEBIDOS encontrados');
+    debugPrint('📤 ${sentPayments.length} pagamentos ENVIADOS encontrados');
+    debugPrint('📋 ${_orders.length} ordens no total');
+    
+    // ========== RECONCILIAR PAGAMENTOS RECEBIDOS ==========
+    // (ordens pending que receberam pagamento)
+    final pendingOrders = _orders.where((o) => o.status == 'pending').toList();
+    debugPrint('\n🔍 Verificando ${pendingOrders.length} ordens PENDENTES...');
+    
+    for (final order in pendingOrders) {
+      final expectedSats = (order.btcAmount * 100000000).toInt();
+      debugPrint('   📋 Ordem ${order.id.substring(0, 8)}: esperado=$expectedSats sats, hash=${order.paymentHash ?? "null"}');
+      
+      // Tentar match por paymentHash primeiro (mais seguro)
+      if (order.paymentHash != null && order.paymentHash!.isNotEmpty) {
+        for (final payment in receivedPayments) {
+          final paymentHash = payment['paymentHash']?.toString();
+          if (paymentHash == order.paymentHash) {
+            debugPrint('   ✅ MATCH por paymentHash! Atualizando para payment_received');
+            await updateOrderStatus(
+              orderId: order.id,
+              status: 'payment_received',
+              metadata: {
+                'reconciledAt': DateTime.now().toIso8601String(),
+                'reconciledFrom': 'auto_reconcile_received',
+                'paymentHash': paymentHash,
+              },
+            );
+            pendingReconciled++;
+            break;
+          }
+        }
+      }
+    }
+    
+    // ========== RECONCILIAR PAGAMENTOS ENVIADOS ==========
+    // (ordens awaiting_confirmation onde o usuário já pagou o Bro)
+    final awaitingOrders = _orders.where((o) => 
+      o.status == 'awaiting_confirmation' || 
+      o.status == 'accepted'
+    ).toList();
+    debugPrint('\n🔍 Verificando ${awaitingOrders.length} ordens AGUARDANDO CONFIRMAÇÃO/ACEITAS...');
+    
+    for (final order in awaitingOrders) {
+      final expectedSats = (order.btcAmount * 100000000).toInt();
+      debugPrint('   📋 Ordem ${order.id.substring(0, 8)}: status=${order.status}, esperado=$expectedSats sats');
+      
+      // Verificar se há um pagamento enviado com valor aproximado
+      // Tolerância de 5% para taxas de rede
+      for (final payment in sentPayments) {
+        final paymentAmount = (payment['amount'] is int) 
+            ? payment['amount'] as int 
+            : int.tryParse(payment['amount']?.toString() ?? '0') ?? 0;
+        
+        final status = payment['status']?.toString() ?? '';
+        
+        // Só considerar pagamentos completados
+        if (!status.toLowerCase().contains('completed') && 
+            !status.toLowerCase().contains('complete')) {
+          continue;
+        }
+        
+        // Verificar se o valor está dentro da tolerância (5%)
+        final tolerance = (expectedSats * 0.05).toInt();
+        final diff = (paymentAmount - expectedSats).abs();
+        
+        if (diff <= tolerance) {
+          debugPrint('   ✅ MATCH por valor! $paymentAmount sats ≈ $expectedSats sats (diff=$diff)');
+          debugPrint('      Status da ordem: ${order.status} → completed');
+          
+          await updateOrderStatus(
+            orderId: order.id,
+            status: 'completed',
+            metadata: {
+              ...?order.metadata,
+              'completedAt': DateTime.now().toIso8601String(),
+              'reconciledFrom': 'auto_reconcile_sent',
+              'paymentAmount': paymentAmount,
+              'paymentId': payment['id'],
+            },
+          );
+          completedReconciled++;
+          break;
+        }
+      }
+    }
+    
+    debugPrint('');
+    debugPrint('═══════════════════════════════════════════════════════════════');
+    debugPrint('📊 RESULTADO DA RECONCILIAÇÃO:');
+    debugPrint('   - Ordens pending → payment_received: $pendingReconciled');
+    debugPrint('   - Ordens awaiting → completed: $completedReconciled');
+    debugPrint('═══════════════════════════════════════════════════════════════');
+    debugPrint('');
+    
+    if (pendingReconciled > 0 || completedReconciled > 0) {
+      await _saveOrders();
+      notifyListeners();
+    }
+    
+    return {
+      'pendingReconciled': pendingReconciled,
+      'completedReconciled': completedReconciled,
+    };
+  }
+
+  /// Callback chamado quando o Breez SDK detecta um pagamento ENVIADO
+  /// Usado para marcar ordens como completed automaticamente
+  Future<void> onPaymentSent({
+    required String paymentId,
+    required int amountSats,
+    String? paymentHash,
+  }) async {
+    debugPrint('💸 OrderProvider.onPaymentSent: $amountSats sats (hash: ${paymentHash ?? "N/A"})');
+    
+    // Buscar ordens aguardando confirmação que podem ter sido pagas
+    final awaitingOrders = _orders.where((o) => 
+      o.status == 'awaiting_confirmation' || 
+      o.status == 'accepted'
+    ).toList();
+    
+    if (awaitingOrders.isEmpty) {
+      debugPrint('📭 Nenhuma ordem aguardando liberação de BTC');
+      return;
+    }
+    
+    debugPrint('🔍 Verificando ${awaitingOrders.length} ordens...');
+    
+    // Procurar ordem com valor correspondente
+    for (final order in awaitingOrders) {
+      final expectedSats = (order.btcAmount * 100000000).toInt();
+      
+      // Tolerância de 5% para taxas
+      final tolerance = (expectedSats * 0.05).toInt();
+      final diff = (amountSats - expectedSats).abs();
+      
+      if (diff <= tolerance) {
+        debugPrint('✅ Ordem ${order.id.substring(0, 8)} corresponde ao pagamento!');
+        debugPrint('   Valor esperado: $expectedSats sats, Valor enviado: $amountSats sats');
+        
+        await updateOrderStatus(
+          orderId: order.id,
+          status: 'completed',
+          metadata: {
+            ...?order.metadata,
+            'completedAt': DateTime.now().toIso8601String(),
+            'completedFrom': 'breez_sdk_payment_sent',
+            'paymentAmount': amountSats,
+            'paymentId': paymentId,
+            'paymentHash': paymentHash,
+          },
+        );
+        
+        // Republicar no Nostr com status completed
+        final updatedOrder = _orders.firstWhere((o) => o.id == order.id);
+        await _publishOrderToNostr(updatedOrder);
+        
+        debugPrint('✅ Ordem ${order.id.substring(0, 8)} marcada como COMPLETED!');
+        return;
+      }
+    }
+    
+    debugPrint('❌ Pagamento de $amountSats sats não correspondeu a nenhuma ordem');
+  }
+
+  /// RECONCILIAÇÃO FORÇADA - Analisa TODAS as ordens e TODOS os pagamentos
+  /// Use quando ordens antigas não estão sendo atualizadas automaticamente
+  /// 
+  /// Esta função é mais agressiva que autoReconcileWithBreezPayments:
+  /// - Verifica TODAS as ordens não-completed (incluindo pending antigas)
+  /// - Usa match por valor com tolerância maior (10%)
+  /// - Cria lista de pagamentos usados para evitar duplicação
+  Future<Map<String, dynamic>> forceReconcileAllOrders(List<Map<String, dynamic>> breezPayments) async {
+    debugPrint('');
+    debugPrint('╔═══════════════════════════════════════════════════════════════╗');
+    debugPrint('║         🔥 RECONCILIAÇÃO FORÇADA DE TODAS AS ORDENS 🔥        ║');
+    debugPrint('╚═══════════════════════════════════════════════════════════════╝');
+    
+    int updated = 0;
+    final usedPaymentIds = <String>{};
+    final reconciliationLog = <Map<String, dynamic>>[];
+    
+    // Listar todos os pagamentos
+    debugPrint('\n📋 PAGAMENTOS NO BREEZ SDK:');
+    for (final p in breezPayments) {
+      final amount = p['amount'];
+      final status = p['status']?.toString() ?? '';
+      final type = p['type']?.toString() ?? '';
+      final id = p['id']?.toString() ?? '';
+      final direction = p['direction']?.toString() ?? type;
+      debugPrint('   💳 $direction: $amount sats - $status - ID: ${id.substring(0, 16)}...');
+    }
+    
+    // Separar por tipo
+    final receivedPayments = breezPayments.where((p) {
+      final type = p['type']?.toString() ?? '';
+      final direction = p['direction']?.toString() ?? '';
+      final isReceived = direction == 'RECEBIDO' || 
+                         type.toLowerCase().contains('receive') ||
+                         type.toLowerCase().contains('received');
+      return isReceived;
+    }).toList();
+    
+    final sentPayments = breezPayments.where((p) {
+      final type = p['type']?.toString() ?? '';
+      final direction = p['direction']?.toString() ?? '';
+      final isSent = direction == 'ENVIADO' || 
+                     type.toLowerCase().contains('send') ||
+                     type.toLowerCase().contains('sent');
+      return isSent;
+    }).toList();
+    
+    debugPrint('\n📊 RESUMO:');
+    debugPrint('   📥 ${receivedPayments.length} pagamentos RECEBIDOS');
+    debugPrint('   📤 ${sentPayments.length} pagamentos ENVIADOS');
+    
+    // Buscar TODAS as ordens não finalizadas
+    final ordersToCheck = _orders.where((o) => 
+      o.status != 'completed' && 
+      o.status != 'cancelled'
+    ).toList();
+    
+    debugPrint('\n📋 ORDENS PARA RECONCILIAR (${ordersToCheck.length}):');
+    for (final order in ordersToCheck) {
+      final sats = (order.btcAmount * 100000000).toInt();
+      debugPrint('   📦 ${order.id.substring(0, 8)}: ${order.status} - R\$ ${order.amount.toStringAsFixed(2)} ($sats sats)');
+    }
+    
+    // ========== VERIFICAR CADA ORDEM ==========
+    debugPrint('\n🔍 INICIANDO RECONCILIAÇÃO...\n');
+    
+    for (final order in ordersToCheck) {
+      final expectedSats = (order.btcAmount * 100000000).toInt();
+      final orderId = order.id.substring(0, 8);
+      
+      debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      debugPrint('📦 Ordem $orderId: ${order.status}');
+      debugPrint('   Valor: R\$ ${order.amount.toStringAsFixed(2)} = $expectedSats sats');
+      
+      // Determinar qual lista de pagamentos verificar baseado no status
+      List<Map<String, dynamic>> paymentsToCheck;
+      String newStatus;
+      
+      if (order.status == 'pending' || order.status == 'payment_received') {
+        // Para ordens pending - procurar em pagamentos RECEBIDOS
+        // (no fluxo atual do Bro, isso é menos comum)
+        paymentsToCheck = receivedPayments;
+        newStatus = 'payment_received';
+        debugPrint('   🔍 Buscando em ${paymentsToCheck.length} pagamentos RECEBIDOS...');
+      } else {
+        // Para ordens accepted/awaiting - procurar em pagamentos ENVIADOS
+        paymentsToCheck = sentPayments;
+        newStatus = 'completed';
+        debugPrint('   🔍 Buscando em ${paymentsToCheck.length} pagamentos ENVIADOS...');
+      }
+      
+      // Procurar pagamento correspondente
+      bool found = false;
+      for (final payment in paymentsToCheck) {
+        final paymentId = payment['id']?.toString() ?? '';
+        
+        // Pular se já foi usado
+        if (usedPaymentIds.contains(paymentId)) continue;
+        
+        final paymentAmount = (payment['amount'] is int) 
+            ? payment['amount'] as int 
+            : int.tryParse(payment['amount']?.toString() ?? '0') ?? 0;
+        
+        final status = payment['status']?.toString() ?? '';
+        
+        // Só considerar pagamentos completados
+        if (!status.toLowerCase().contains('completed') && 
+            !status.toLowerCase().contains('complete') &&
+            !status.toLowerCase().contains('succeeded')) {
+          continue;
+        }
+        
+        // Tolerância de 10% para match (mais agressivo)
+        final tolerance = (expectedSats * 0.10).toInt().clamp(100, 10000);
+        final diff = (paymentAmount - expectedSats).abs();
+        
+        debugPrint('   📊 Comparando: ordem=$expectedSats sats vs pagamento=$paymentAmount sats (diff=$diff, tol=$tolerance)');
+        
+        if (diff <= tolerance) {
+          debugPrint('   ✅ MATCH ENCONTRADO!');
+          
+          // Marcar pagamento como usado
+          usedPaymentIds.add(paymentId);
+          
+          // Atualizar ordem
+          await updateOrderStatus(
+            orderId: order.id,
+            status: newStatus,
+            metadata: {
+              ...?order.metadata,
+              'reconciledAt': DateTime.now().toIso8601String(),
+              'reconciledFrom': 'force_reconcile',
+              'paymentAmount': paymentAmount,
+              'paymentId': paymentId,
+            },
+          );
+          
+          reconciliationLog.add({
+            'orderId': order.id,
+            'oldStatus': order.status,
+            'newStatus': newStatus,
+            'paymentAmount': paymentAmount,
+            'expectedAmount': expectedSats,
+          });
+          
+          updated++;
+          found = true;
+          break;
+        }
+      }
+      
+      if (!found) {
+        debugPrint('   ❌ Nenhum pagamento correspondente encontrado');
+      }
+    }
+    
+    debugPrint('');
+    debugPrint('╔═══════════════════════════════════════════════════════════════╗');
+    debugPrint('║                    📊 RESULTADO FINAL                         ║');
+    debugPrint('╠═══════════════════════════════════════════════════════════════╣');
+    debugPrint('║   Ordens atualizadas: $updated                                 ');
+    debugPrint('╚═══════════════════════════════════════════════════════════════╝');
+    
+    if (updated > 0) {
+      await _saveOrders();
+      notifyListeners();
+    }
+    
+    return {
+      'updated': updated,
+      'log': reconciliationLog,
+    };
+  }
+
+  /// Forçar status de uma ordem específica para 'completed'
+  /// Use quando você tem certeza que a ordem foi paga mas o sistema não detectou
+  Future<bool> forceCompleteOrder(String orderId) async {
+    final index = _orders.indexWhere((o) => o.id == orderId);
+    if (index == -1) {
+      debugPrint('❌ Ordem não encontrada: $orderId');
+      return false;
+    }
+    
+    final order = _orders[index];
+    debugPrint('🔧 Forçando conclusão da ordem ${order.id.substring(0, 8)}');
+    debugPrint('   Status atual: ${order.status}');
+    
+    _orders[index] = order.copyWith(
+      status: 'completed',
+      completedAt: DateTime.now(),
+      metadata: {
+        ...?order.metadata,
+        'forcedCompleteAt': DateTime.now().toIso8601String(),
+        'forcedBy': 'user_manual',
+      },
+    );
+    
+    await _saveOrders();
+    
+    // Republicar no Nostr
+    await _publishOrderToNostr(_orders[index]);
+    
+    notifyListeners();
+    debugPrint('✅ Ordem marcada como COMPLETED');
+    return true;
   }
 }

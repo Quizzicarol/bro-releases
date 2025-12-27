@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Modelo de garantia local
 class LocalCollateral {
@@ -86,6 +86,11 @@ class LocalCollateral {
 /// 6. Provedor pode "sacar" (remover reserva) se não tiver ordens em aberto
 class LocalCollateralService {
   static const String _collateralKey = 'local_collateral';
+  static final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  
+  // Cache em memória para garantir consistência
+  static LocalCollateral? _cachedCollateral;
+  static bool _cacheInitialized = false;
 
   /// Configurar garantia para um tier
   Future<LocalCollateral> setCollateral({
@@ -94,8 +99,6 @@ class LocalCollateralService {
     required int requiredSats,
     required double maxOrderBrl,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
-    
     final collateral = LocalCollateral(
       tierId: tierId,
       tierName: tierName,
@@ -107,8 +110,21 @@ class LocalCollateralService {
       updatedAt: DateTime.now(),
     );
     
-    await prefs.setString(_collateralKey, json.encode(collateral.toJson()));
-    debugPrint('✅ Garantia local configurada: $tierName ($requiredSats sats)');
+    final jsonStr = json.encode(collateral.toJson());
+    debugPrint('💾 setCollateral: Salvando tier $tierName ($requiredSats sats)');
+    debugPrint('💾 setCollateral: JSON=$jsonStr');
+    
+    await _storage.write(key: _collateralKey, value: jsonStr);
+    debugPrint('💾 setCollateral: Salvo no FlutterSecureStorage');
+    
+    // IMPORTANTE: Atualizar cache em memória
+    _cachedCollateral = collateral;
+    _cacheInitialized = true;
+    debugPrint('💾 setCollateral: Cache atualizado');
+    
+    // Verificar se realmente salvou
+    final verify = await _storage.read(key: _collateralKey);
+    debugPrint('💾 setCollateral: Verificação pós-save: ${verify != null ? "OK" : "FALHOU"}');
     
     return collateral;
   }
@@ -116,12 +132,29 @@ class LocalCollateralService {
   /// Obter garantia atual
   Future<LocalCollateral?> getCollateral() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final dataStr = prefs.getString(_collateralKey);
+      // Se cache já foi inicializado, usar cache
+      if (_cacheInitialized && _cachedCollateral != null) {
+        debugPrint('🔍 getCollateral: Usando cache - ${_cachedCollateral!.tierName}');
+        return _cachedCollateral;
+      }
       
-      if (dataStr == null) return null;
+      final dataStr = await _storage.read(key: _collateralKey);
       
-      return LocalCollateral.fromJson(json.decode(dataStr));
+      debugPrint('🔍 getCollateral: key=$_collateralKey');
+      debugPrint('🔍 getCollateral: dataStr=${dataStr?.substring(0, (dataStr?.length ?? 0).clamp(0, 100)) ?? "null"}...');
+      
+      if (dataStr == null) {
+        debugPrint('📭 getCollateral: Nenhuma garantia salva');
+        _cacheInitialized = true; // Marcar como inicializado mesmo se null
+        return null;
+      }
+      
+      final collateral = LocalCollateral.fromJson(json.decode(dataStr));
+      // Atualizar cache
+      _cachedCollateral = collateral;
+      _cacheInitialized = true;
+      debugPrint('✅ getCollateral: Tier ${collateral.tierName} (${collateral.requiredSats} sats) - Cache atualizado');
+      return collateral;
     } catch (e) {
       debugPrint('❌ Erro ao carregar garantia local: $e');
       return null;
@@ -130,8 +163,19 @@ class LocalCollateralService {
 
   /// Verificar se tem garantia configurada
   Future<bool> hasCollateral() async {
+    // Verificar cache primeiro
+    if (_cacheInitialized) {
+      return _cachedCollateral != null;
+    }
     final collateral = await getCollateral();
     return collateral != null;
+  }
+  
+  /// Limpar cache (para forçar reload do SharedPreferences)
+  static void clearCache() {
+    _cachedCollateral = null;
+    _cacheInitialized = false;
+    debugPrint('🗑️ Cache de collateral limpo');
   }
 
   /// Verificar se pode aceitar uma ordem de determinado valor
@@ -158,8 +202,8 @@ class LocalCollateralService {
       activeOrders: collateral.activeOrders + 1,
     );
     
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_collateralKey, json.encode(updated.toJson()));
+    await _storage.write(key: _collateralKey, value: json.encode(updated.toJson()));
+    _cachedCollateral = updated;
     
     debugPrint('🔒 Ordem $orderId travada. Total ordens: ${updated.activeOrders}');
     return updated;
@@ -173,8 +217,8 @@ class LocalCollateralService {
       activeOrders: newActiveOrders,
     );
     
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_collateralKey, json.encode(updated.toJson()));
+    await _storage.write(key: _collateralKey, value: json.encode(updated.toJson()));
+    _cachedCollateral = updated;
     
     debugPrint('🔓 Ordem $orderId liberada. Total ordens: ${updated.activeOrders}');
     return updated;
@@ -193,8 +237,9 @@ class LocalCollateralService {
 
   /// Remover garantia completamente
   Future<void> withdrawAll() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_collateralKey);
+    await _storage.delete(key: _collateralKey);
+    _cachedCollateral = null;
+    _cacheInitialized = false;
     debugPrint('✅ Garantia local removida');
   }
 }

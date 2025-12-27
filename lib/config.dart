@@ -23,7 +23,7 @@ class AppConfig {
   
   /// Permite provedores sem garantia depositada
   /// ⚠️ PRODUÇÃO: DEVE SER FALSE
-  static const bool providerTestMode = false; // DESATIVADO para teste de garantias
+  static const bool providerTestMode = false; // DESATIVADO - corrigir persistência!
 
   // ============================================
   // BACKEND API

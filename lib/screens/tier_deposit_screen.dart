@@ -8,6 +8,10 @@ import '../providers/collateral_provider.dart';
 import '../models/collateral_tier.dart';
 import '../services/local_collateral_service.dart';
 import '../services/payment_monitor_service.dart';
+import '../services/secure_storage_service.dart';
+import '../services/nostr_service.dart';
+import '../services/nostr_order_service.dart';
+import 'provider_orders_screen.dart';
 
 /// Taxa estimada para claim de depósito on-chain (em sats)
 /// Baseado em ~200-400 sats observados na rede, com margem de segurança
@@ -165,10 +169,19 @@ class _TierDepositScreenState extends State<TierDepositScreen> {
       final availableForCollateral = (totalBalance - committedSats).clamp(0, totalBalance);
       
       if (availableForCollateral >= widget.tier.requiredCollateralSats) {
-        setState(() {
-          _isLoading = false;
-          _depositCompleted = true;
-        });
+        // ✅ IMPORTANTE: Ativar o tier antes de marcar como completo!
+        debugPrint('✅ Saldo suficiente detectado, ativando tier automaticamente...');
+        await _activateTier(availableForCollateral);
+        
+        // ✅ NAVEGAR DIRETAMENTE PARA A TELA DE ORDENS
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ProviderOrdersScreen(providerId: widget.providerId),
+            ),
+          );
+        }
         return;
       }
 
@@ -332,13 +345,45 @@ class _TierDepositScreenState extends State<TierDepositScreen> {
 
   Future<void> _activateTier(int balance) async {
     final collateralService = LocalCollateralService();
+    final nostrService = NostrService();
+    final nostrOrderService = NostrOrderService();
     
+    // Salvar tier localmente
     await collateralService.setCollateral(
       tierId: widget.tier.id,
       tierName: widget.tier.name,
       requiredSats: widget.tier.requiredCollateralSats,
       maxOrderBrl: widget.tier.maxOrderValueBrl,
     );
+
+    // ✅ IMPORTANTE: Publicar tier no Nostr para persistência entre logins
+    final privateKey = nostrService.privateKey;
+    if (privateKey != null) {
+      try {
+        final published = await nostrOrderService.publishProviderTier(
+          privateKey: privateKey,
+          tierId: widget.tier.id,
+          tierName: widget.tier.name,
+          depositedSats: widget.tier.requiredCollateralSats,
+          maxOrderValue: widget.tier.maxOrderValueBrl.round(),
+          activatedAt: DateTime.now().toIso8601String(),
+        );
+        
+        if (published) {
+          debugPrint('✅ Tier publicado no Nostr com sucesso!');
+        } else {
+          debugPrint('⚠️ Falha ao publicar tier no Nostr (salvo apenas localmente)');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Erro ao publicar tier no Nostr: $e');
+      }
+    } else {
+      debugPrint('⚠️ Private key não disponível, tier salvo apenas localmente');
+    }
+
+    // ✅ IMPORTANTE: Marcar como modo provedor para persistir entre sessões
+    await SecureStorageService.setProviderMode(true);
+    debugPrint('✅ Provider mode ativado e persistido');
 
     // ✅ IMPORTANTE: Atualizar o CollateralProvider para refletir a mudança
     if (mounted) {
@@ -447,7 +492,15 @@ class _TierDepositScreenState extends State<TierDepositScreen> {
             ),
             const SizedBox(height: 32),
             ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () {
+                // Navegar diretamente para a tela de ordens disponíveis
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ProviderOrdersScreen(providerId: widget.providerId),
+                  ),
+                );
+              },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.green,
                 padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 16),

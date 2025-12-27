@@ -32,6 +32,7 @@ class NostrOrderService {
   static const int kindBroAccept = 30079;
   static const int kindBroPaymentProof = 30080;
   static const int kindBroComplete = 30081;
+  static const int kindBroProviderTier = 30082; // Tier do provedor
 
   // Tag para identificar ordens do app
   static const String broTag = 'bro-order';
@@ -409,6 +410,50 @@ class NostrOrderService {
     return 'pending';
   }
 
+  /// Busca uma ordem específica do Nostr pelo ID
+  Future<Map<String, dynamic>?> fetchOrderFromNostr(String orderId) async {
+    debugPrint('🔍 Buscando ordem $orderId no Nostr...');
+    
+    for (final relay in _relays) {
+      try {
+        final events = await _fetchFromRelay(
+          relay,
+          kinds: [kindBroOrder],
+          tags: {'#d': [orderId]}, // Buscar pelo d-tag (orderId)
+          limit: 1,
+        );
+        
+        if (events.isNotEmpty) {
+          final event = events.first;
+          final content = event['parsedContent'] ?? jsonDecode(event['content']);
+          
+          debugPrint('✅ Ordem $orderId encontrada no relay $relay');
+          
+          return {
+            'id': orderId,
+            'eventId': event['id'],
+            'userPubkey': event['pubkey'],
+            'billType': content['billType'] ?? 'pix',
+            'billCode': content['billCode'] ?? '',
+            'amount': (content['amount'] as num?)?.toDouble() ?? 0,
+            'btcAmount': (content['btcAmount'] as num?)?.toDouble() ?? 0,
+            'btcPrice': (content['btcPrice'] as num?)?.toDouble() ?? 0,
+            'providerFee': (content['providerFee'] as num?)?.toDouble() ?? 0,
+            'platformFee': (content['platformFee'] as num?)?.toDouble() ?? 0,
+            'total': (content['total'] as num?)?.toDouble() ?? 0,
+            'status': content['status'] ?? 'pending',
+            'createdAt': content['createdAt'],
+          };
+        }
+      } catch (e) {
+        debugPrint('⚠️ Falha ao buscar ordem de $relay: $e');
+      }
+    }
+    
+    debugPrint('❌ Ordem $orderId não encontrada no Nostr');
+    return null;
+  }
+
   /// Publica uma ordem usando objeto Order
   Future<String?> publishOrder({
     required Order order,
@@ -554,21 +599,27 @@ class NostrOrderService {
         .toList();
   }
 
-  /// Busca ordens pendentes (raw)
+  /// Busca ordens pendentes (raw) - todas as ordens disponíveis para Bros
   Future<List<Map<String, dynamic>>> _fetchPendingOrdersRaw() async {
     final orders = <Map<String, dynamic>>[];
     final seenIds = <String>{};
 
-    debugPrint('🔍 Buscando ordens pendentes nos relays...');
+    debugPrint('🔍 Buscando ordens disponíveis para Bros nos relays...');
+    debugPrint('   Relays: ${_relays.take(3).join(", ")}');
 
     for (final relay in _relays.take(3)) {
+      debugPrint('   Tentando relay: $relay');
       try {
+        // Buscar TODAS as ordens com tag bro (sem filtrar por status específico)
+        // O status é filtrado depois no EscrowService
         final relayOrders = await _fetchFromRelay(
           relay,
           kinds: [kindBroOrder],
-          tags: {'#t': [broTag], '#status': ['pending']},
-          limit: 50,
+          tags: {'#t': [broTag]},
+          limit: 100,
         );
+        
+        debugPrint('   $relay retornou ${relayOrders.length} eventos');
         
         for (final order in relayOrders) {
           final id = order['id'];
@@ -582,7 +633,7 @@ class NostrOrderService {
       }
     }
 
-    debugPrint('✅ Encontradas ${orders.length} ordens pendentes');
+    debugPrint('✅ Encontradas ${orders.length} ordens totais nos relays');
     return orders;
   }
 
@@ -703,5 +754,107 @@ class NostrOrderService {
 
     debugPrint('✅ ${updates.length} atualizações encontradas');
     return updates;
+  }
+
+  // ============================================
+  // TIER/COLLATERAL - Persistência no Nostr
+  // ============================================
+  
+  /// Kind para dados do provedor (tier, collateral, etc)
+  static const int kindBroProviderData = 30082;
+  static const String providerDataTag = 'bro-provider-data';
+  
+  /// Publica os dados do tier/collateral do provedor no Nostr
+  Future<bool> publishProviderTier({
+    required String privateKey,
+    required String tierId,
+    required String tierName,
+    required int depositedSats,
+    required int maxOrderValue,
+    required String activatedAt,
+  }) async {
+    try {
+      final keychain = Keychain(privateKey);
+      
+      final content = jsonEncode({
+        'type': 'bro_provider_tier',
+        'version': '1.0',
+        'tierId': tierId,
+        'tierName': tierName,
+        'depositedSats': depositedSats,
+        'maxOrderValue': maxOrderValue,
+        'activatedAt': activatedAt,
+        'updatedAt': DateTime.now().toIso8601String(),
+      });
+
+      // Usar evento replaceable (kind 30082) com 'd' tag = pubkey do provedor
+      // Isso permite atualizar o tier sem criar múltiplos eventos
+      final event = Event.from(
+        kind: kindBroProviderTier,
+        tags: [
+          ['d', 'tier_${keychain.public}'], // Identificador único por provedor
+          ['t', providerDataTag],
+          ['t', broAppTag],
+          ['tierId', tierId],
+        ],
+        content: content,
+        privkey: keychain.private,
+      );
+
+      debugPrint('📤 Publicando tier $tierId do provedor nos relays...');
+      
+      int successCount = 0;
+      for (final relay in _relays) {
+        try {
+          final success = await _publishToRelay(relay, event);
+          if (success) successCount++;
+        } catch (e) {
+          debugPrint('⚠️ Falha ao publicar tier em $relay: $e');
+        }
+      }
+
+      debugPrint('✅ Tier publicado em $successCount/${_relays.length} relays');
+      return successCount > 0;
+    } catch (e) {
+      debugPrint('❌ Erro ao publicar tier: $e');
+      return false;
+    }
+  }
+
+  /// Busca os dados do tier do provedor no Nostr
+  Future<Map<String, dynamic>?> fetchProviderTier(String providerPubkey) async {
+    debugPrint('🔍 Buscando tier do provedor $providerPubkey...');
+    
+    for (final relay in _relays) {
+      try {
+        final events = await _fetchFromRelay(
+          relay,
+          kinds: [kindBroProviderTier],
+          tags: {'#d': ['tier_$providerPubkey']},
+          limit: 1,
+        );
+        
+        if (events.isNotEmpty) {
+          final event = events.first;
+          final content = event['parsedContent'] ?? jsonDecode(event['content']);
+          
+          debugPrint('✅ Tier encontrado: ${content['tierName']}');
+          
+          return {
+            'tierId': content['tierId'],
+            'tierName': content['tierName'],
+            'depositedSats': content['depositedSats'],
+            'maxOrderValue': content['maxOrderValue'],
+            'activatedAt': content['activatedAt'],
+            'updatedAt': content['updatedAt'],
+          };
+        }
+      } catch (e) {
+        debugPrint('⚠️ Falha ao buscar tier de $relay: $e');
+      }
+    }
+    
+    debugPrint('❌ Tier não encontrado no Nostr');
+    return null;
   }
 }

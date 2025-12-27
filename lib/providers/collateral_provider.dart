@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import '../models/collateral_tier.dart';
 import '../services/bitcoin_price_service.dart';
 import '../services/local_collateral_service.dart';
+import '../services/nostr_service.dart';
+import '../services/nostr_order_service.dart';
 
 /// Provider para gerenciar garantias (collateral) dos provedores
 /// Usa sistema local de garantia (fundos ficam na carteira do próprio provedor)
@@ -69,6 +71,13 @@ class CollateralProvider with ChangeNotifier {
 
       // SISTEMA LOCAL: Carregar garantia local (fundos ficam na carteira do provedor)
       _localCollateral = await _localCollateralService.getCollateral();
+      
+      // Se não tem garantia local, tentar buscar do Nostr
+      if (_localCollateral == null) {
+        debugPrint('📭 Garantia local não encontrada, buscando no Nostr...');
+        await _tryRestoreFromNostr();
+      }
+      
       if (_localCollateral != null) {
         debugPrint('✅ Garantia local carregada: ${_localCollateral!.tierName}');
         debugPrint('   Sats travados: ${_localCollateral!.lockedSats}');
@@ -94,6 +103,42 @@ class CollateralProvider with ChangeNotifier {
       _error = e.toString();
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  /// Tenta restaurar tier do Nostr quando não encontrado localmente
+  Future<void> _tryRestoreFromNostr() async {
+    try {
+      final nostrService = NostrService();
+      final nostrOrderService = NostrOrderService();
+      
+      final publicKey = nostrService.publicKey;
+      if (publicKey == null) {
+        debugPrint('⚠️ PublicKey não disponível para buscar tier no Nostr');
+        return;
+      }
+      
+      debugPrint('🔍 Buscando tier no Nostr para pubkey: $publicKey');
+      
+      final tierData = await nostrOrderService.fetchProviderTier(publicKey);
+      
+      if (tierData != null) {
+        debugPrint('✅ Tier encontrado no Nostr: ${tierData['tierName']}');
+        
+        // Restaurar tier localmente
+        _localCollateral = await _localCollateralService.setCollateral(
+          tierId: tierData['tierId'],
+          tierName: tierData['tierName'],
+          requiredSats: tierData['depositedSats'],
+          maxOrderBrl: (tierData['maxOrderValue'] as num).toDouble(),
+        );
+        
+        debugPrint('✅ Tier restaurado do Nostr e salvo localmente');
+      } else {
+        debugPrint('📭 Nenhum tier encontrado no Nostr');
+      }
+    } catch (e) {
+      debugPrint('⚠️ Erro ao buscar tier do Nostr: $e');
     }
   }
 

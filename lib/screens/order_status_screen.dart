@@ -161,10 +161,27 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
         return;
       }
       
-      // CORREÇÃO: Usar OrderProvider local em vez de API que pode falhar
+      // CORREÇÃO: Sincronizar com Nostr para buscar atualizações (aceites, comprovantes)
       final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+      
+      // Forçar sincronização com Nostr a cada polling
+      try {
+        await orderProvider.syncOrdersFromNostr();
+      } catch (e) {
+        debugPrint('⚠️ Erro ao sincronizar Nostr no polling: $e');
+      }
+      
+      if (!mounted) return;
+      
       final order = orderProvider.getOrderById(widget.orderId);
       final status = order?.status ?? _currentStatus;
+      
+      // Atualizar orderDetails com dados mais recentes (incluindo metadata/proofImage)
+      if (order != null && mounted) {
+        setState(() {
+          _orderDetails = order.toJson();
+        });
+      }
       
       if (status != _currentStatus) {
         // Notificar sobre mudanca de status
@@ -180,9 +197,11 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
         }
       }
 
-      // Verificar expiração
+      // REMOVIDO: Ordens em 'pending' NÃO expiram
+      // Só expiram após Bro aceitar e usuário demorar 24h para confirmar
+      // A expiração só deve ocorrer no status 'awaiting_confirmation'
       if (!mounted) return;
-      if (_expiresAt != null && _orderService.isOrderExpired(_expiresAt!)) {
+      if (_currentStatus == 'awaiting_confirmation' && _expiresAt != null && _orderService.isOrderExpired(_expiresAt!)) {
         timer.cancel();
         _showExpiredDialog();
       }
@@ -252,22 +271,51 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
       
       bool success = false;
       
-      // Se estiver em modo teste, cancelar localmente
-      if (AppConfig.testMode) {
+      // SEMPRE cancelar localmente primeiro (modo P2P via Nostr)
+      // Isso garante que funciona mesmo sem backend
+      try {
+        final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+        await orderProvider.updateOrderStatusLocal(widget.orderId, 'cancelled');
+        success = true;
+        debugPrint('✅ Ordem ${widget.orderId} cancelada localmente');
+      } catch (e) {
+        debugPrint('⚠️ Erro ao cancelar ordem local: $e');
+      }
+      
+      // Se não está em modo teste, também tentar notificar backend (com timeout)
+      if (!AppConfig.testMode && !success) {
         try {
-          final orderProvider = Provider.of<OrderProvider>(context, listen: false);
-          await orderProvider.updateOrderStatusLocal(widget.orderId, 'cancelled');
-          success = true;
-          debugPrint('✅ Ordem ${widget.orderId} cancelada localmente');
+          success = await _orderService.cancelOrder(
+            orderId: widget.orderId,
+            userId: widget.userId ?? '',
+            reason: 'Cancelado pelo usuário',
+          ).timeout(
+            const Duration(seconds: 5),
+            onTimeout: () {
+              debugPrint('⚠️ Timeout ao cancelar no backend, usando cancelamento local');
+              return false;
+            },
+          );
+          
+          // Se backend falhou mas temos acesso local, cancelar local mesmo assim
+          if (!success) {
+            final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+            await orderProvider.updateOrderStatusLocal(widget.orderId, 'cancelled');
+            success = true;
+            debugPrint('✅ Ordem ${widget.orderId} cancelada localmente (fallback)');
+          }
         } catch (e) {
-          debugPrint('❌ Erro ao cancelar ordem local: $e');
+          debugPrint('⚠️ Erro ao cancelar no backend: $e');
+          // Tentar cancelar local como fallback
+          try {
+            final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+            await orderProvider.updateOrderStatusLocal(widget.orderId, 'cancelled');
+            success = true;
+            debugPrint('✅ Ordem ${widget.orderId} cancelada localmente (fallback)');
+          } catch (e2) {
+            debugPrint('❌ Erro ao cancelar ordem local (fallback): $e2');
+          }
         }
-      } else {
-        success = await _orderService.cancelOrder(
-          orderId: widget.orderId,
-          userId: widget.userId ?? '',
-          reason: 'Cancelado pelo usuário',
-        );
       }
 
       setState(() => _isLoading = false);
@@ -1062,7 +1110,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_currentStatus == 'pending' ? 'Aguardando Pagamento' : 'Status da Ordem'),
+        title: Text(_currentStatus == 'pending' ? 'Aguardando Bro' : 'Status da Ordem'),
         backgroundColor: _currentStatus == 'pending' ? Colors.orange : Colors.blue,
       ),
       body: RefreshIndicator(
@@ -1086,10 +1134,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
               _buildInfoCard(),
               const SizedBox(height: 24),
               if (_currentStatus == 'pending') ...[
-                _buildPayButton(),
-                const SizedBox(height: 12),
-                _buildVerifyPaymentButton(),
-                const SizedBox(height: 12),
+                // Ordem aguardando um Bro aceitar - só mostra botão cancelar
                 _buildCancelButton(),
               ],
               // Botão cancelar para confirmed e payment_received (aguardando Bro aceitar)
@@ -1158,7 +1203,8 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
               ),
               textAlign: TextAlign.center,
             ),
-            if (_currentStatus == 'pending' && _expiresAt != null) ...[
+            // Mostrar data de criação da ordem (importante para rastreamento)
+            if (_orderDetails != null && _orderDetails!['createdAt'] != null) ...[
               const SizedBox(height: 16),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1169,12 +1215,38 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.timer, color: Colors.white, size: 20),
+                    const Icon(Icons.calendar_today, color: Colors.white, size: 18),
                     const SizedBox(width: 8),
                     Text(
-                      'Expira em: ${_orderService.formatTimeRemaining(_orderService.getTimeRemaining(_expiresAt!))}',
+                      'Criada em: ${_formatCreatedAt(_orderDetails!['createdAt'])}',
                       style: const TextStyle(
                         color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            // Mostrar expiração SOMENTE quando estiver aguardando confirmação do usuário
+            if (_currentStatus == 'awaiting_confirmation' && _expiresAt != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.timer, color: Colors.orange, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Confirme em: ${_orderService.formatTimeRemaining(_orderService.getTimeRemaining(_expiresAt!))}',
+                      style: const TextStyle(
+                        color: Colors.orange,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -1187,22 +1259,50 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
       ),
     );
   }
+  
+  String _formatCreatedAt(dynamic createdAt) {
+    try {
+      DateTime date;
+      if (createdAt is DateTime) {
+        date = createdAt;
+      } else if (createdAt is String) {
+        date = DateTime.parse(createdAt);
+      } else {
+        return 'Data desconhecida';
+      }
+      
+      final now = DateTime.now();
+      final diff = now.difference(date);
+      
+      if (diff.inMinutes < 1) {
+        return 'agora';
+      } else if (diff.inMinutes < 60) {
+        return 'há ${diff.inMinutes} min';
+      } else if (diff.inHours < 24) {
+        return 'há ${diff.inHours}h';
+      } else {
+        return '${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+      }
+    } catch (e) {
+      return 'Data desconhecida';
+    }
+  }
 
   Map<String, dynamic> _getStatusInfo() {
     switch (_currentStatus) {
       case 'pending':
         return {
-          'icon': Icons.payment,
-          'title': 'Aguardando Pagamento',
-          'subtitle': 'Pague com Bitcoin para prosseguir',
-          'color': Colors.orange,
+          'icon': Icons.hourglass_empty,
+          'title': 'Aguardando Bro',
+          'subtitle': 'Sua ordem está disponível para Bros',
+          'color': Colors.blue,
         };
       case 'payment_received':
         return {
-          'icon': Icons.check,
-          'title': 'Pagamento Recebido',
-          'subtitle': 'Seus sats foram recebidos',
-          'color': Colors.teal,
+          'icon': Icons.hourglass_empty,
+          'title': 'Saldo Reservado',
+          'subtitle': 'Aguardando um Bro aceitar sua ordem',
+          'color': Colors.blue,
         };
       case 'confirmed':
         return {
@@ -1340,16 +1440,16 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
             const Divider(height: 24),
             _buildTimelineStep(
               number: '1',
-              title: 'Aguardando Pagamento',
-              subtitle: 'Pague com Bitcoin para prosseguir',
-              isActive: _currentStatus == 'pending',
-              isCompleted: _currentStatus != 'pending',
+              title: 'Ordem Criada',
+              subtitle: 'Saldo reservado na sua carteira',
+              isActive: false,
+              isCompleted: true,
             ),
             _buildTimelineStep(
               number: '2',
               title: 'Aguardando um Bro',
-              subtitle: 'Um provedor irá aceitar sua ordem',
-              isActive: _currentStatus == 'confirmed' || _currentStatus == 'payment_received',
+              subtitle: 'Um Bro irá aceitar sua ordem',
+              isActive: _currentStatus == 'pending' || _currentStatus == 'confirmed' || _currentStatus == 'payment_received',
               isCompleted: ['accepted', 'awaiting_confirmation', 'payment_submitted', 'completed'].contains(_currentStatus),
             ),
             _buildTimelineStep(
@@ -2912,127 +3012,8 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     }
   }
 
-  /// Botão para verificar se o pagamento já foi recebido
-  /// Útil para ordens antigas que perderam a sincronização de status
-  Widget _buildVerifyPaymentButton() {
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: _handleVerifyPayment,
-        icon: const Icon(Icons.search),
-        label: const Text('Já paguei, verificar pagamento'),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: Colors.blue,
-          side: const BorderSide(color: Colors.blue),
-          padding: const EdgeInsets.symmetric(vertical: 16),
-        ),
-      ),
-    );
-  }
-
-  /// Verificar se o pagamento foi recebido na carteira
-  Future<void> _handleVerifyPayment() async {
-    // Mostrar loading
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const AlertDialog(
-        content: Row(
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 20),
-            Text('Verificando pagamentos...'),
-          ],
-        ),
-      ),
-    );
-
-    try {
-      final breezProvider = Provider.of<BreezProvider>(context, listen: false);
-      final orderProvider = Provider.of<OrderProvider>(context, listen: false);
-      
-      // Buscar pagamentos do Breez SDK
-      final payments = await breezProvider.listPayments();
-      
-      if (!mounted) return;
-      Navigator.pop(context); // Fechar loading
-      
-      // Tentar verificar e corrigir a ordem
-      final verified = await orderProvider.verifyAndFixOrderPayment(
-        widget.orderId,
-        payments,
-      );
-      
-      if (!mounted) return;
-      
-      if (verified) {
-        // Atualizar UI
-        await _loadOrderDetails();
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.check_circle, color: Colors.white),
-                SizedBox(width: 8),
-                Text('✅ Pagamento encontrado! Status atualizado.'),
-              ],
-            ),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else {
-        // Mostrar dialog explicando que não foi encontrado
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Row(
-              children: [
-                Icon(Icons.info_outline, color: Colors.orange),
-                SizedBox(width: 8),
-                Text('Pagamento não encontrado'),
-              ],
-            ),
-            content: const Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Não foi possível encontrar um pagamento correspondente a esta ordem.',
-                  style: TextStyle(fontSize: 14),
-                ),
-                SizedBox(height: 12),
-                Text(
-                  'Possíveis causas:',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-                SizedBox(height: 8),
-                Text('• O pagamento ainda não foi enviado'),
-                Text('• O pagamento está pendente de confirmação'),
-                Text('• O valor enviado é diferente do esperado'),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      Navigator.pop(context); // Fechar loading se ainda aberto
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao verificar: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
+  // REMOVIDO: _buildVerifyPaymentButton - não deve existir no fluxo Bro
+  // O usuário não paga a ordem, ele RESERVA garantia. O Bro é quem paga a conta.
 
   Widget _buildCancelButton() {
     return SizedBox(
@@ -3244,7 +3225,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
       // Buscar informações completas da ordem
       Map<String, dynamic>? orderDetails = _orderDetails;
       
-      if (AppConfig.testMode && orderDetails == null) {
+      if (orderDetails == null) {
         final orderProvider = context.read<OrderProvider>();
         final order = orderProvider.getOrderById(widget.orderId);
         if (order != null) {
@@ -3252,17 +3233,21 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
         }
       }
 
-      // Atualizar status para 'completed'
-      if (AppConfig.testMode) {
-        final orderProvider = context.read<OrderProvider>();
-        await orderProvider.updateOrderStatus(orderId: widget.orderId, status: 'completed');
+      // Atualizar status para 'completed' - SEMPRE usar OrderProvider que publica no Nostr
+      final orderProvider = context.read<OrderProvider>();
+      final updateSuccess = await orderProvider.updateOrderStatus(
+        orderId: widget.orderId,
+        status: 'completed',
+      );
+      
+      if (!updateSuccess) {
+        debugPrint('⚠️ Falha ao atualizar status para completed');
       } else {
-        // TODO: Implementar update via API
-        debugPrint('⚠️ Update de status não implementado para produção');
+        debugPrint('✅ Status atualizado para completed e publicado no Nostr');
       }
 
-      // Adicionar ganho ao saldo do provedor E taxa da plataforma (apenas em test mode)
-      if (AppConfig.testMode && orderDetails != null) {
+      // Adicionar ganho ao saldo do provedor E taxa da plataforma
+      if (orderDetails != null) {
         final providerBalanceProvider = context.read<ProviderBalanceProvider>();
         final platformBalanceProvider = context.read<PlatformBalanceProvider>();
         

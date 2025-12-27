@@ -95,7 +95,7 @@ void _scheduleReconciliationOnStartup(BreezProvider breezProvider, OrderProvider
   });
 }
 
-/// Tentar reconciliacao se houver saldo
+/// Tentar reconciliacao completa com pagamentos do Breez
 Future<void> _tryReconciliation(BreezProvider breezProvider, OrderProvider orderProvider) async {
   if (!breezProvider.isInitialized) {
     debugPrint('SDK ainda nao inicializado, reconciliacao adiada');
@@ -103,14 +103,28 @@ Future<void> _tryReconciliation(BreezProvider breezProvider, OrderProvider order
   }
 
   try {
-    final balanceData = await breezProvider.getBalance();
-    final balance = int.tryParse(balanceData['balance']?.toString() ?? '0') ?? 0;
-
-    if (balance > 0) {
-      debugPrint('Reconciliacao automatica: Saldo detectado = $balance sats');
-      await orderProvider.reconcileOnStartup(balance);
+    debugPrint('🔄 Iniciando reconciliação automática na inicialização...');
+    
+    // Buscar TODOS os pagamentos (recebidos e enviados)
+    final payments = await breezProvider.getAllPayments();
+    
+    if (payments.isEmpty) {
+      debugPrint('📭 Nenhum pagamento na carteira para reconciliar');
+      return;
+    }
+    
+    debugPrint('💰 ${payments.length} pagamentos encontrados, reconciliando...');
+    
+    // Usar o novo método completo de reconciliação
+    final result = await orderProvider.autoReconcileWithBreezPayments(payments);
+    
+    final pendingReconciled = result['pendingReconciled'] ?? 0;
+    final completedReconciled = result['completedReconciled'] ?? 0;
+    
+    if (pendingReconciled > 0 || completedReconciled > 0) {
+      debugPrint('🎉 Reconciliação na inicialização: $pendingReconciled pending→paid, $completedReconciled awaiting→completed');
     } else {
-      debugPrint('Saldo zero, nenhuma reconciliacao necessaria');
+      debugPrint('✅ Nenhuma ordem precisou ser reconciliada na inicialização');
     }
   } catch (e) {
     debugPrint('Erro na reconciliacao: $e');
@@ -150,9 +164,21 @@ class BroApp extends StatelessWidget {
 
           // RECONCILIACAO AUTOMATICA: Conectar callback de pagamento ao OrderProvider
           final orderProvider = context.read<OrderProvider>();
+          
+          // Callback para pagamentos RECEBIDOS (menos comum no fluxo atual)
           breezProvider.onPaymentReceived = (String paymentId, int amountSats, String? paymentHash) {
             debugPrint('🔔 CALLBACK MAIN: Pagamento recebido! Reconciliando automaticamente...');
             orderProvider.onPaymentReceived(
+              paymentId: paymentId,
+              amountSats: amountSats,
+              paymentHash: paymentHash,
+            );
+          };
+          
+          // Callback para pagamentos ENVIADOS (quando usuário libera BTC para o Bro)
+          breezProvider.onPaymentSent = (String paymentId, int amountSats, String? paymentHash) {
+            debugPrint('🔔 CALLBACK MAIN: Pagamento ENVIADO! Marcando ordem como completed...');
+            orderProvider.onPaymentSent(
               paymentId: paymentId,
               amountSats: amountSats,
               paymentHash: paymentHash,

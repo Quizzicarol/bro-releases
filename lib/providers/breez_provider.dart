@@ -28,6 +28,12 @@ class BreezProvider with ChangeNotifier {
   // Callback para notificar pagamentos recebidos
   // Parâmetros: paymentId, amountSats, paymentHash (opcional)
   Function(String paymentId, int amountSats, String? paymentHash)? onPaymentReceived;
+  
+  // Callback para notificar pagamentos ENVIADOS
+  // Parâmetros: paymentId, amountSats, paymentHash (opcional)
+  // Usado para atualizar ordens para 'completed' automaticamente
+  Function(String paymentId, int amountSats, String? paymentHash)? onPaymentSent;
+  
   String? _lastPaymentId;
   int? _lastPaymentAmount;
   String? _lastPaymentHash;  // PaymentHash do último pagamento para verificação precisa
@@ -91,12 +97,25 @@ class BreezProvider with ChangeNotifier {
     
     if (_isLoading) {
       debugPrint('⏳ SDK já está sendo inicializado, aguardando...');
-      // Aguardar inicialização em andamento
+      // Aguardar inicialização em andamento COM TIMEOUT
+      int waitCount = 0;
+      const maxWait = 300; // 30 segundos máximo (300 x 100ms)
       await Future.doWhile(() async {
         await Future.delayed(const Duration(milliseconds: 100));
+        waitCount++;
+        if (waitCount >= maxWait) {
+          debugPrint('⏰ TIMEOUT esperando inicialização! Forçando reset...');
+          _isLoading = false; // Forçar reset do estado
+          return false; // Sair do loop
+        }
         return _isLoading && !_isInitialized;
       });
-      return _isInitialized;
+      
+      if (_isInitialized) {
+        return true;
+      }
+      // Se deu timeout, continuar com nova inicialização
+      debugPrint('🔄 Continuando com nova inicialização após timeout...');
     }
     
     _setLoading(true);
@@ -134,17 +153,15 @@ class BreezProvider with ChangeNotifier {
         debugPrint('🔍 BREEZ: Buscando seed do usuário atual...');
         debugPrint('═══════════════════════════════════════════════════════════');
         
-        // BUSCA 1: Com pubkey do usuário atual
-        String? savedMnemonic = await StorageService().getBreezMnemonic();
+        // BUSCA: Sempre com pubkey do usuário atual para evitar pegar seed de outro usuário
+        final pubkey = await StorageService().getNostrPublicKey();
+        String? savedMnemonic;
         
-        // BUSCA 2: Se não encontrou, tentar buscar pubkey e buscar novamente
-        if (savedMnemonic == null || savedMnemonic.isEmpty) {
-          debugPrint('⚠️ Primeira busca falhou. Tentando obter pubkey manualmente...');
-          final pubkey = await StorageService().getNostrPublicKey();
-          if (pubkey != null) {
-            debugPrint('   Pubkey encontrado: ${pubkey.substring(0, 16)}...');
-            savedMnemonic = await StorageService().getBreezMnemonic(forPubkey: pubkey);
-          }
+        if (pubkey != null) {
+          debugPrint('   Pubkey: ${pubkey.substring(0, 16)}...');
+          savedMnemonic = await StorageService().getBreezMnemonic(forPubkey: pubkey);
+        } else {
+          debugPrint('⚠️ Nenhum pubkey encontrado! Seed não será carregada.');
         }
         
         if (savedMnemonic != null && savedMnemonic.isNotEmpty && savedMnemonic.split(' ').length == 12) {
@@ -992,8 +1009,8 @@ class BreezProvider with ChangeNotifier {
     }
   }
 
-  /// Pay a Lightning invoice (BOLT11)
-  Future<Map<String, dynamic>?> payInvoice(String bolt11) async {
+  /// Pay a Lightning invoice (BOLT11) or LNURL/Lightning Address
+  Future<Map<String, dynamic>?> payInvoice(String bolt11, {int? amountSats}) async {
     if (!_isInitialized || _sdk == null) {
       return {'success': false, 'error': 'SDK não inicializado'};
     }
@@ -1002,8 +1019,22 @@ class BreezProvider with ChangeNotifier {
     _setError(null);
     
     debugPrint('💸 Pagando invoice...');
+    debugPrint('   Input: ${bolt11.substring(0, bolt11.length > 50 ? 50 : bolt11.length)}...');
+    if (amountSats != null) {
+      debugPrint('   Amount (manual): $amountSats sats');
+    }
 
     try {
+      // Verificar se é Lightning Address ou LNURL
+      final lowerInput = bolt11.toLowerCase();
+      final isLnAddress = bolt11.contains('@') && bolt11.contains('.');
+      final isLnurl = lowerInput.startsWith('lnurl');
+      
+      // Se for LNURL ou Lightning Address, precisa de valor
+      if ((isLnAddress || isLnurl) && amountSats == null) {
+        return {'success': false, 'error': 'Para Lightning Address/LNURL, informe o valor em sats'};
+      }
+
       // Primeiro, decodificar invoice para ver o valor
       int? invoiceAmount;
       try {
@@ -1015,6 +1046,10 @@ class BreezProvider with ChangeNotifier {
             invoiceAmount = (amountMsat ~/ BigInt.from(1000)).toInt();
           }
           debugPrint('📋 Valor da invoice: $invoiceAmount sats');
+        } else {
+          // Para outros tipos, usa amountSats se fornecido
+          debugPrint('📋 Tipo de input não é BOLT11, usando amountSats se fornecido');
+          invoiceAmount = amountSats;
         }
       } catch (e) {
         debugPrint('⚠️ Não foi possível decodificar invoice: $e');
@@ -1025,8 +1060,9 @@ class BreezProvider with ChangeNotifier {
       final currentBalance = int.tryParse(balanceInfo?['balance']?.toString() ?? '0') ?? 0;
       debugPrint('💰 Saldo atual: $currentBalance sats');
 
-      if (invoiceAmount != null && currentBalance < invoiceAmount) {
-        final errorMsg = 'Saldo insuficiente. Você tem $currentBalance sats mas a invoice requer $invoiceAmount sats';
+      final requiredAmount = amountSats ?? invoiceAmount;
+      if (requiredAmount != null && currentBalance < requiredAmount) {
+        final errorMsg = 'Saldo insuficiente. Você tem $currentBalance sats mas precisa de $requiredAmount sats';
         _setError(errorMsg);
         debugPrint('❌ $errorMsg');
         return {
@@ -1034,18 +1070,20 @@ class BreezProvider with ChangeNotifier {
           'error': errorMsg,
           'errorType': 'INSUFFICIENT_FUNDS',
           'balance': currentBalance,
-          'required': invoiceAmount,
+          'required': requiredAmount,
         };
       }
 
       // Step 1: Prepare payment
       final prepareReq = spark.PrepareSendPaymentRequest(
         paymentRequest: bolt11,
-        amount: null,
+        amount: null, // SDK deduz do invoice BOLT11
         tokenIdentifier: null,
       );
 
+      debugPrint('📤 Preparando pagamento...');
       final prepareResp = await _sdk!.prepareSendPayment(request: prepareReq);
+      debugPrint('✅ Pagamento preparado');
 
       // Step 2: Send payment
       final sendReq = spark.SendPaymentRequest(
@@ -1053,6 +1091,7 @@ class BreezProvider with ChangeNotifier {
         options: null,
       );
 
+      debugPrint('📤 Enviando pagamento...');
       final resp = await _sdk!.sendPayment(request: sendReq);
 
       debugPrint('✅ Pagamento enviado!');
@@ -1063,6 +1102,12 @@ class BreezProvider with ChangeNotifier {
       String? paymentHash;
       if (resp.payment.details is spark.PaymentDetails_Lightning) {
         paymentHash = (resp.payment.details as spark.PaymentDetails_Lightning).paymentHash;
+      }
+
+      // NOTIFICAR callback de pagamento enviado (para reconciliação automática)
+      if (onPaymentSent != null) {
+        debugPrint('🎉 Chamando callback onPaymentSent para reconciliação automática');
+        onPaymentSent!(resp.payment.id, resp.payment.amount.toInt(), paymentHash);
       }
 
       return {
@@ -1087,10 +1132,18 @@ class BreezProvider with ChangeNotifier {
         errMsg = 'Não foi possível encontrar rota para pagamento';
       } else if (errMsg.contains('expired') || errMsg.contains('Expired')) {
         errMsg = 'Invoice expirada. Solicite uma nova.';
+      } else if (errMsg.contains('unsupported') || errMsg.contains('Unsupported') ||
+                 errMsg.contains('payment method') || errMsg.contains('PaymentMethod')) {
+        errMsg = 'Tipo de pagamento não suportado. Use uma invoice Lightning (BOLT11) válida que comece com "lnbc" ou "lntb".';
+      } else if (errMsg.contains('invalid') || errMsg.contains('Invalid')) {
+        errMsg = 'Invoice inválida. Verifique se copiou corretamente.';
+      } else if (errMsg.contains('parse') || errMsg.contains('Parse')) {
+        errMsg = 'Não foi possível interpretar o código. Use uma invoice Lightning válida.';
       }
       
       _setError(errMsg);
       debugPrint('❌ Erro ao pagar: $errMsg');
+      debugPrint('   Erro original: ${e.toString()}');
       return {'success': false, 'error': errMsg};
     } finally {
       _setLoading(false);
