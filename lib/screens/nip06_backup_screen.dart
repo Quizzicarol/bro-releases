@@ -139,9 +139,9 @@ class _Nip06BackupScreenState extends State<Nip06BackupScreen> {
         publicKey: _derivedPublicKey!,
       );
       
-      // Também salvar a seed
+      // FORÇAR atualização da seed (usuário escolheu restaurar)
       final newMnemonic = _mnemonicController.text.trim();
-      await _storage.saveBreezMnemonic(newMnemonic);
+      await _storage.forceUpdateBreezMnemonic(newMnemonic, ownerPubkey: _derivedPublicKey!);
       
       // Reinicializar carteira Lightning com nova seed
       if (mounted) {
@@ -668,8 +668,9 @@ class _Nip06BackupScreenState extends State<Nip06BackupScreen> {
     try {
       debugPrint('🔄 [NIP06] Restaurando carteira Lightning...');
       
-      // Salvar seed no storage
-      await _storage.saveBreezMnemonic(mnemonic);
+      // FORÇAR atualização de seed (usuário escolheu explicitamente restaurar)
+      // Igual ao login avançado - usa forceOverwrite para substituir a seed atual
+      await _storage.forceUpdateBreezMnemonic(mnemonic);
       
       // Reinicializar SDK com a seed
       if (mounted) {

@@ -6,6 +6,7 @@ import '../providers/order_provider.dart';
 import '../services/escrow_service.dart';
 import '../services/nostr_service.dart';
 import '../services/secure_storage_service.dart';
+import '../services/local_collateral_service.dart';
 import '../config.dart';
 import 'provider_order_detail_screen.dart';
 
@@ -26,6 +27,7 @@ class _ProviderOrdersScreenState extends State<ProviderOrdersScreen> {
   final EscrowService _escrowService = EscrowService();
   List<Map<String, dynamic>> _availableOrders = [];
   bool _isLoading = false;
+  bool _hasCollateral = false; // Verificação local de garantia
   String? _error;
   int _lastOrderCount = 0;
 
@@ -76,14 +78,31 @@ class _ProviderOrdersScreenState extends State<ProviderOrdersScreen> {
     debugPrint('🔵 setState chamado: _isLoading = true');
 
     try {
+      // NÃO limpar cache - pode ter acabado de ser setado pelo TierDepositScreen!
+      // Se precisar forçar refresh, o usuário pode fazer pull-to-refresh
+      
+      // IMPORTANTE: Verificar garantia DIRETAMENTE do LocalCollateralService
+      final collateralService = LocalCollateralService();
+      final localCollateral = await collateralService.getCollateral();
+      _hasCollateral = localCollateral != null;
+      debugPrint('✅ Verificação direta de garantia: hasCollateral=$_hasCollateral');
+      if (localCollateral != null) {
+        debugPrint('   Tier: ${localCollateral.tierName} (${localCollateral.requiredSats} sats)');
+      }
+      
+      // Também atualizar o CollateralProvider para manter consistência
+      final collateralProvider = context.read<CollateralProvider>();
+      await collateralProvider.initialize(widget.providerId);
+      debugPrint('✅ CollateralProvider inicializado, hasCollateral: ${collateralProvider.hasCollateral}');
+      
       List<Map<String, dynamic>> orders;
       
       // SEMPRE buscar ordens do OrderProvider (modo P2P via Nostr)
-      debugPrint('📦 Buscando ordens do OrderProvider...');
+      debugPrint('📦 Buscando ordens do OrderProvider (modo PROVEDOR)...');
       final orderProvider = context.read<OrderProvider>();
       
-      // Sincronizar com Nostr primeiro
-      await orderProvider.fetchOrders();
+      // Sincronizar com Nostr - modo PROVEDOR busca TODAS as ordens pendentes
+      await orderProvider.fetchOrders(forProvider: true);
       
       debugPrint('📦 OrderProvider tem ${orderProvider.orders.length} ordens');
       
@@ -204,15 +223,16 @@ class _ProviderOrdersScreenState extends State<ProviderOrdersScreen> {
       ),
       body: Consumer2<CollateralProvider, OrderProvider>(
         builder: (context, collateralProvider, orderProvider, child) {
-          // Em modo teste do provedor, permitir acesso sem garantia
-          if (!AppConfig.providerTestMode && !collateralProvider.hasCollateral) {
-            return _buildNoCollateralView();
-          }
-
+          // Mostrar loading primeiro
           if (_isLoading) {
             return const Center(
               child: CircularProgressIndicator(color: Colors.orange),
             );
+          }
+          
+          // Verificar garantia local
+          if (!AppConfig.providerTestMode && !_hasCollateral && !collateralProvider.hasCollateral) {
+            return _buildNoCollateralView();
           }
 
           if (_error != null) {

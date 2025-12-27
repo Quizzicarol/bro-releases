@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -26,21 +27,55 @@ class EscrowService {
   }
 
   Future<void> lockCollateral({required String providerId, required String orderId, required int lockedSats}) async {
-    // Em modo teste, apenas logar
-    if (AppConfig.testMode) {
+    // Em modo teste OU providerTestMode, apenas logar
+    if (AppConfig.testMode || AppConfig.providerTestMode) {
       debugPrint('🧪 Modo teste: lockCollateral simulado para ordem $orderId');
       return;
     }
-    await http.post(Uri.parse('$baseUrl/collateral/lock'), headers: {'Content-Type': 'application/json'}, body: json.encode({'provider_id': providerId, 'order_id': orderId, 'locked_sats': lockedSats}));
+    
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/collateral/lock'), 
+        headers: {'Content-Type': 'application/json'}, 
+        body: json.encode({'provider_id': providerId, 'order_id': orderId, 'locked_sats': lockedSats}),
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          debugPrint('⏱️ Timeout ao travar garantia - continuando mesmo assim');
+          return http.Response('{}', 408); // Retorna timeout mas continua
+        },
+      );
+      
+      debugPrint('🔒 lockCollateral response: ${response.statusCode}');
+    } catch (e) {
+      // Logar erro mas não bloquear - a garantia é gerenciada localmente
+      debugPrint('⚠️ Erro ao chamar lockCollateral no backend: $e');
+      debugPrint('   Continuando com garantia local...');
+    }
   }
 
   Future<void> unlockCollateral({required String providerId, required String orderId}) async {
-    // Em modo teste, apenas logar
-    if (AppConfig.testMode) {
+    // Em modo teste OU providerTestMode, apenas logar
+    if (AppConfig.testMode || AppConfig.providerTestMode) {
       debugPrint('🧪 Modo teste: unlockCollateral simulado para ordem $orderId');
       return;
     }
-    await http.post(Uri.parse('$baseUrl/collateral/unlock'), headers: {'Content-Type': 'application/json'}, body: json.encode({'provider_id': providerId, 'order_id': orderId}));
+    
+    try {
+      await http.post(
+        Uri.parse('$baseUrl/collateral/unlock'), 
+        headers: {'Content-Type': 'application/json'}, 
+        body: json.encode({'provider_id': providerId, 'order_id': orderId}),
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          debugPrint('⏱️ Timeout ao liberar garantia - continuando mesmo assim');
+          return http.Response('{}', 408);
+        },
+      );
+    } catch (e) {
+      debugPrint('⚠️ Erro ao chamar unlockCollateral no backend: $e');
+    }
   }
 
   Future<Map<String, dynamic>> createEscrow({required String orderId, required String userId, required int amountSats}) async {
@@ -109,13 +144,14 @@ class EscrowService {
     final filteredOrders = orders
         .where((order) {
           final status = order.status;
-          final orderPubkey = order.userPubkey;
           
-          // Excluir ordens criadas pelo próprio provedor
-          if (currentUserPubkey != null && orderPubkey == currentUserPubkey) {
-            debugPrint('  ⏭️ Ordem ${order.id.substring(0, 8)}: PULADA (própria ordem)');
-            return false;
-          }
+          // NOTA: Permitimos que o provedor veja suas próprias ordens para testes
+          // Em produção, pode querer descomentar o filtro abaixo:
+          // final orderPubkey = order.userPubkey;
+          // if (currentUserPubkey != null && orderPubkey == currentUserPubkey) {
+          //   debugPrint('  ⏭️ Ordem ${order.id.substring(0, 8)}: PULADA (própria ordem)');
+          //   return false;
+          // }
           
           // Ordens disponíveis para provedor:
           // - pending: criada mas ainda não paga (se quiser aceitar antes)

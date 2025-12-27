@@ -189,18 +189,12 @@ class StorageService {
     final obfuscated = _obfuscateSeed(mnemonic);
     await _prefs?.setString(backupKey, obfuscated);
     
-    // BACKUP 3: MASTER SEED - nunca é apagado, usado como último recurso
-    await _secureStorage.write(key: _masterSeedKey, value: mnemonic);
-    await _prefs?.setString('MASTER_SEED_PREFS', obfuscated);
+    // NÃO salvar mais em MASTER_SEED ou breez_mnemonic global!
+    // Isso causava conflito entre seeds de diferentes usuários.
     
-    // BACKUP 4: Salvar também com chave legada para compatibilidade
-    await _secureStorage.write(key: 'breez_mnemonic', value: mnemonic);
-    
-    debugPrint('🔐 Seed salva em 4 locais para usuário: ${pubkey.substring(0, 16)}...');
+    debugPrint('🔐 Seed salva para usuário: ${pubkey.substring(0, 16)}...');
     debugPrint('   1. SecureStorage[$seedKey]');
     debugPrint('   2. SharedPrefs[$backupKey]');  
-    debugPrint('   3. MASTER_SEED_BACKUP');
-    debugPrint('   4. breez_mnemonic (legado)');
     debugPrint('   Seed: ${mnemonic.split(' ').take(2).join(' ')}...');
   }
   
@@ -338,6 +332,19 @@ class StorageService {
         }
       }
     }
+    
+    // IMPORTANTE: Se foi especificado um pubkey específico (forPubkey), 
+    // NÃO usar MASTER_SEED como fallback!
+    // O MASTER_SEED pode ter uma seed de outro usuário/derivação anterior.
+    // Neste caso, retornar NULL para que o login_screen derive a seed correta.
+    if (forPubkey != null) {
+      debugPrint('📭 Nenhuma seed encontrada para pubkey específico.');
+      debugPrint('   (MASTER_SEED ignorado - pode ser de outro usuário)');
+      debugPrint('═══════════════════════════════════════════════════════════');
+      return null;
+    }
+    
+    // A partir daqui, buscar em fontes GLOBAIS (apenas quando não há pubkey específico)
     
     // FONTE 3: MASTER SEED BACKUP (nunca é apagado)
     mnemonic = await _secureStorage.read(key: _masterSeedKey);

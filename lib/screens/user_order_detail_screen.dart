@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:convert';
 import '../providers/order_provider.dart';
 import '../models/order.dart';
-import '../config.dart';
 
 /// Tela de detalhes de uma ordem completada (histórico do usuário)
 class UserOrderDetailScreen extends StatefulWidget {
@@ -37,18 +37,23 @@ class _UserOrderDetailScreenState extends State<UserOrderDetailScreen> {
     });
 
     try {
-      if (AppConfig.testMode) {
-        final orderProvider = context.read<OrderProvider>();
-        final order = orderProvider.getOrderById(widget.orderId);
-        
-        if (mounted) {
-          setState(() {
-            _order = order;
-            _isLoading = false;
-          });
-        }
-      } else {
-        // TODO: Buscar do backend em produção
+      final orderProvider = context.read<OrderProvider>();
+      
+      // Forçar sincronização com Nostr para pegar dados mais recentes
+      try {
+        await orderProvider.syncOrdersFromNostr();
+      } catch (e) {
+        debugPrint('⚠️ Erro ao sincronizar Nostr: $e');
+      }
+      
+      // Buscar ordem do provider
+      final order = orderProvider.getOrderById(widget.orderId);
+      
+      if (mounted) {
+        setState(() {
+          _order = order;
+          _isLoading = false;
+        });
       }
     } catch (e) {
       debugPrint('❌ Erro ao carregar ordem: $e');
@@ -329,9 +334,10 @@ class _UserOrderDetailScreenState extends State<UserOrderDetailScreen> {
 
   Widget _buildReceiptCard() {
     final metadata = _order!.metadata!;
-    final receiptUrl = metadata['receipt_url'] as String?;
+    // Compatibilidade com ambos formatos de comprovante
+    final receiptUrl = metadata['receipt_url'] as String? ?? metadata['proofImage'] as String?;
     final confirmationCode = metadata['confirmation_code'] as String?;
-    final submittedAt = metadata['receipt_submitted_at'] as String?;
+    final submittedAt = metadata['receipt_submitted_at'] as String? ?? metadata['proofReceivedAt'] as String?;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -401,16 +407,33 @@ class _UserOrderDetailScreenState extends State<UserOrderDetailScreen> {
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.blue.withOpacity(0.3)),
               ),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.image, color: Colors.blue),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Text(
-                      'Comprovante em imagem',
-                      style: TextStyle(color: Colors.white70, fontSize: 14),
-                    ),
+                  Row(
+                    children: [
+                      const Icon(Icons.image, color: Colors.blue),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'Comprovante em imagem',
+                          style: TextStyle(color: Colors.white70, fontSize: 14),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => _showReceiptImage(receiptUrl),
+                        child: const Text('Ver'),
+                      ),
+                    ],
                   ),
+                  // Mostrar preview da imagem se for base64
+                  if (receiptUrl.startsWith('data:image') || receiptUrl.length > 100) ...[
+                    const SizedBox(height: 12),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: _buildReceiptImageWidget(receiptUrl),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -435,6 +458,113 @@ class _UserOrderDetailScreenState extends State<UserOrderDetailScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildReceiptImageWidget(String receiptUrl) {
+    try {
+      String base64Data = receiptUrl;
+      
+      // Se for data URI, extrair apenas a parte base64
+      if (receiptUrl.contains(',')) {
+        base64Data = receiptUrl.split(',').last;
+      }
+      
+      final bytes = base64Decode(base64Data);
+      
+      return ConstrainedBox(
+        constraints: const BoxConstraints(
+          maxHeight: 200,
+        ),
+        child: Image.memory(
+          bytes,
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            debugPrint('❌ Erro ao exibir imagem: $error');
+            return Container(
+              padding: const EdgeInsets.all(16),
+              color: Colors.red.withOpacity(0.2),
+              child: const Row(
+                children: [
+                  Icon(Icons.error_outline, color: Colors.red),
+                  SizedBox(width: 8),
+                  Text(
+                    'Erro ao carregar imagem',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      );
+    } catch (e) {
+      debugPrint('❌ Erro ao decodificar base64: $e');
+      return Container(
+        padding: const EdgeInsets.all(16),
+        color: Colors.orange.withOpacity(0.2),
+        child: const Row(
+          children: [
+            Icon(Icons.warning_amber, color: Colors.orange),
+            SizedBox(width: 8),
+            Text(
+              'Formato de imagem inválido',
+              style: TextStyle(color: Colors.orange),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  void _showReceiptImage(String receiptUrl) {
+    try {
+      String base64Data = receiptUrl;
+      
+      // Se for data URI, extrair apenas a parte base64
+      if (receiptUrl.contains(',')) {
+        base64Data = receiptUrl.split(',').last;
+      }
+      
+      final bytes = base64Decode(base64Data);
+      
+      showDialog(
+        context: context,
+        builder: (context) => Dialog(
+          backgroundColor: Colors.black,
+          insetPadding: const EdgeInsets.all(16),
+          child: Stack(
+            children: [
+              InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 4.0,
+                child: Center(
+                  child: Image.memory(
+                    bytes,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('❌ Erro ao mostrar imagem fullscreen: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Erro ao abrir imagem'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   String _formatDate(DateTime dateTime) {

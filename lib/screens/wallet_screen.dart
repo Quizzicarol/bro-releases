@@ -250,11 +250,6 @@ class _WalletScreenState extends State<WalletScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.bug_report),
-            tooltip: 'Diagnóstico',
-            onPressed: _showDiagnostics,
-          ),
-          IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _isLoading ? null : _loadWalletInfo,
           ),
@@ -1256,14 +1251,25 @@ class _WalletScreenState extends State<WalletScreen> {
 
   // ==================== ENVIAR COM INVOICE PRÉ-PREENCHIDA ====================
   void _showSendDialogWithInvoice(String invoice) {
+    debugPrint('📤 Abrindo dialog de envio com invoice: ${invoice.substring(0, 50)}...');
+    
     // Verificar se é endereço Bitcoin (não suportado)
     if (_isBitcoinAddress(invoice)) {
       _showBitcoinAddressNotSupportedDialog(invoice);
       return;
     }
     
+    // Verificar se é Lightning Address ou LNURL (precisa de valor manual)
+    final lowerInvoice = invoice.toLowerCase();
+    final isLnAddress = invoice.contains('@') && invoice.contains('.');
+    final isLnurl = lowerInvoice.startsWith('lnurl');
+    final needsAmountInput = isLnAddress || isLnurl;
+    
     final invoiceController = TextEditingController(text: invoice);
+    final amountController = TextEditingController();
     bool isSending = false;
+    String? errorMessage;
+    int? invoiceAmountSats; // Valor da invoice (se BOLT11)
     
     // Get current balance and available balance
     final balanceSats = int.tryParse(_balance?['balance']?.toString() ?? '0') ?? 0;
@@ -1271,6 +1277,42 @@ class _WalletScreenState extends State<WalletScreen> {
     final committedSats = orderProvider.committedSats;
     final availableSats = (balanceSats - committedSats).clamp(0, balanceSats);
     final hasLockedFunds = committedSats > 0;
+    
+    // Tentar decodificar o valor da invoice BOLT11
+    if (lowerInvoice.startsWith('lnbc') || lowerInvoice.startsWith('lntb')) {
+      // É uma invoice BOLT11 - tentar extrair o valor
+      // Formato: lnbc<amount><unit>... onde unit pode ser m (milli), u (micro), n (nano), p (pico)
+      try {
+        final regex = RegExp(r'^ln[bt]c(\d+)([munp]?)');
+        final match = regex.firstMatch(lowerInvoice);
+        if (match != null) {
+          final amountStr = match.group(1)!;
+          final unit = match.group(2) ?? '';
+          var amount = int.parse(amountStr);
+          
+          // Converter para sats baseado na unidade
+          switch (unit) {
+            case 'm': // milli-bitcoin (0.001 BTC)
+              invoiceAmountSats = amount * 100000;
+              break;
+            case 'u': // micro-bitcoin (0.000001 BTC)
+              invoiceAmountSats = amount * 100;
+              break;
+            case 'n': // nano-bitcoin (0.000000001 BTC)
+              invoiceAmountSats = (amount / 10).round();
+              break;
+            case 'p': // pico-bitcoin (0.000000000001 BTC)
+              invoiceAmountSats = (amount / 10000).round();
+              break;
+            default: // sem unidade = BTC
+              invoiceAmountSats = amount * 100000000;
+          }
+          debugPrint('💰 Valor da invoice decodificado: $invoiceAmountSats sats');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Não foi possível decodificar valor da invoice: $e');
+      }
+    }
     
     showModalBottomSheet(
       context: context,
@@ -1382,18 +1424,37 @@ class _WalletScreenState extends State<WalletScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Row(
+                      Row(
                         children: [
-                          Icon(Icons.bolt, color: Colors.amber, size: 16),
-                          SizedBox(width: 6),
+                          const Icon(Icons.bolt, color: Colors.amber, size: 16),
+                          const SizedBox(width: 6),
                           Text(
-                            'Lightning Invoice',
-                            style: TextStyle(
+                            isLnAddress ? 'Lightning Address' : 
+                            isLnurl ? 'LNURL' : 'Lightning Invoice',
+                            style: const TextStyle(
                               color: Colors.amber,
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
+                          const Spacer(),
+                          if (invoiceAmountSats != null) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '$invoiceAmountSats sats',
+                                style: const TextStyle(
+                                  color: Colors.green,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -1410,6 +1471,62 @@ class _WalletScreenState extends State<WalletScreen> {
                     ],
                   ),
                 ),
+                
+                // Campo de valor (para LNURL ou Lightning Address)
+                if (needsAmountInput) ...[
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: amountController,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Colors.white, fontSize: 18),
+                    decoration: InputDecoration(
+                      labelText: 'Valor em sats *',
+                      labelStyle: const TextStyle(color: Colors.white54),
+                      hintText: 'Ex: 1000',
+                      hintStyle: const TextStyle(color: Colors.white24),
+                      filled: true,
+                      fillColor: const Color(0xFF2A2A2A),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      prefixIcon: const Icon(Icons.bolt, color: Colors.amber),
+                      suffixText: 'sats',
+                      suffixStyle: const TextStyle(color: Colors.white54),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '* Este endereço requer que você informe o valor',
+                    style: TextStyle(color: Colors.amber, fontSize: 11),
+                  ),
+                ],
+                
+                // Erro
+                if (errorMessage != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.red.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error, color: Colors.red, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            errorMessage!,
+                            style: const TextStyle(color: Colors.red, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                
                 const SizedBox(height: 20),
                 
                 // Botão Enviar
@@ -1417,16 +1534,80 @@ class _WalletScreenState extends State<WalletScreen> {
                   width: double.infinity,
                   child: ElevatedButton.icon(
                     onPressed: isSending ? null : () async {
-                      setModalState(() => isSending = true);
-                      debugPrint('💸 Enviando pagamento escaneado...');
+                      debugPrint('🔘 Botão de envio pressionado!');
+                      
+                      // Validar valor se necessário
+                      if (needsAmountInput) {
+                        final amountStr = amountController.text.trim();
+                        if (amountStr.isEmpty) {
+                          setModalState(() => errorMessage = 'Por favor, informe o valor em sats');
+                          return;
+                        }
+                        final amount = int.tryParse(amountStr);
+                        if (amount == null || amount <= 0) {
+                          setModalState(() => errorMessage = 'Valor inválido');
+                          return;
+                        }
+                        if (amount > availableSats) {
+                          setModalState(() => errorMessage = 'Saldo insuficiente (disponível: $availableSats sats)');
+                          return;
+                        }
+                      }
+                      
+                      // Validar saldo para invoice BOLT11 com valor
+                      if (invoiceAmountSats != null && invoiceAmountSats! > availableSats) {
+                        setModalState(() => errorMessage = 'Saldo insuficiente! Necessário: $invoiceAmountSats sats, Disponível: $availableSats sats');
+                        return;
+                      }
+                      
+                      setModalState(() {
+                        isSending = true;
+                        errorMessage = null;
+                      });
+                      
+                      debugPrint('💸 Enviando pagamento...');
+                      debugPrint('   Input original: ${invoice.length > 50 ? invoice.substring(0, 50) : invoice}...');
+                      if (needsAmountInput) {
+                        debugPrint('   Valor: ${amountController.text} sats');
+                      }
                       
                       try {
                         final breezProvider = context.read<BreezProvider>();
-                        final result = await breezProvider.payInvoice(invoice);
+                        String finalInvoice = invoice;
                         
-                        debugPrint('📨 Resultado: $result');
+                        // Para Lightning Address ou LNURL, resolver para BOLT11 primeiro
+                        if (isLnAddress || isLnurl) {
+                          debugPrint('🔄 Resolvendo Lightning Address/LNURL...');
+                          setModalState(() => errorMessage = null);
+                          
+                          final amountSats = int.parse(amountController.text.trim());
+                          final lnService = LnAddressService();
+                          
+                          // Usar getInvoice que funciona tanto para LN Address quanto LNURL
+                          final resolveResult = await lnService.getInvoice(
+                            lnAddress: invoice,
+                            amountSats: amountSats,
+                          );
+                          
+                          if (resolveResult['success'] != true) {
+                            setModalState(() {
+                              isSending = false;
+                              errorMessage = resolveResult['error'] ?? 'Falha ao resolver endereço';
+                            });
+                            return;
+                          }
+                          
+                          finalInvoice = resolveResult['invoice'] as String;
+                          debugPrint('✅ Resolvido para invoice BOLT11: ${finalInvoice.substring(0, 50)}...');
+                        }
+                        
+                        // Agora pagar a invoice BOLT11
+                        final result = await breezProvider.payInvoice(finalInvoice);
+                        
+                        debugPrint('📨 Resultado do pagamento: $result');
                         
                         if (result != null && result['success'] == true) {
+                          debugPrint('✅ Pagamento bem sucedido!');
                           if (context.mounted) {
                             Navigator.pop(context);
                             _loadWalletInfo();
@@ -1445,28 +1626,19 @@ class _WalletScreenState extends State<WalletScreen> {
                             );
                           }
                         } else {
-                          setModalState(() => isSending = false);
-                          final errorMsg = result?['error'] ?? 'Falha ao enviar pagamento';
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(errorMsg),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
-                          }
+                          debugPrint('❌ Pagamento falhou: ${result?['error']}');
+                          setModalState(() {
+                            isSending = false;
+                            errorMessage = result?['error'] ?? 'Falha ao enviar pagamento';
+                          });
                         }
-                      } catch (e) {
-                        debugPrint('❌ Erro ao enviar: $e');
-                        setModalState(() => isSending = false);
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Erro: $e'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                        }
+                      } catch (e, stack) {
+                        debugPrint('❌ Exceção ao enviar: $e');
+                        debugPrint('   Stack: $stack');
+                        setModalState(() {
+                          isSending = false;
+                          errorMessage = 'Erro: $e';
+                        });
                       }
                     },
                     icon: isSending

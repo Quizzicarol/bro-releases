@@ -52,7 +52,7 @@ class BreezProvider with ChangeNotifier {
     return {'success': false, 'error': 'Lightning não disponível nesta plataforma'};
   }
 
-  Future<Map<String, dynamic>?> payInvoice(String bolt11) async {
+  Future<Map<String, dynamic>?> payInvoice(String bolt11, {int? amountSats}) async {
     return {'success': false, 'error': 'Lightning não disponível nesta plataforma'};
   }
 

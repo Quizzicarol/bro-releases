@@ -39,53 +39,33 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
   }
 
   /// Reconcilia automaticamente ordens com pagamentos da carteira
+  /// Usa o método autoReconcileWithBreezPayments do OrderProvider que verifica:
+  /// 1. Pagamentos RECEBIDOS → ordens pending → payment_received
+  /// 2. Pagamentos ENVIADOS → ordens awaiting_confirmation → completed
   Future<void> _autoReconcileOrders(OrderProvider orderProvider, BreezProvider breezProvider) async {
     try {
       debugPrint('🔄 Iniciando reconciliação automática de ordens...');
       
-      // Buscar todos os pagamentos da carteira
+      // Buscar todos os pagamentos da carteira (recebidos E enviados)
       final payments = await breezProvider.getAllPayments();
       
-      // Extrair paymentHashes de pagamentos recebidos com sucesso
-      final paidHashes = <String>{};
-      for (var p in payments) {
-        final status = p['status']?.toString() ?? '';
-        final hash = p['paymentHash']?.toString() ?? '';
-        
-        if (status.contains('completed') && hash.isNotEmpty && hash != 'N/A') {
-          paidHashes.add(hash);
-        }
+      if (payments.isEmpty) {
+        debugPrint('📭 Nenhum pagamento na carteira para reconciliar');
+        return;
       }
       
-      debugPrint('💰 ${paidHashes.length} pagamentos encontrados na carteira');
+      // Usar o novo método completo de reconciliação
+      final result = await orderProvider.autoReconcileWithBreezPayments(payments);
       
-      // Verificar cada ordem
-      int updated = 0;
-      for (var order in orderProvider.orders) {
-        // Se a ordem tem paymentHash e está na lista de pagos
-        if (order.paymentHash != null && 
-            order.paymentHash!.isNotEmpty && 
-            paidHashes.contains(order.paymentHash)) {
-          
-          // Se o status não reflete o pagamento, atualizar
-          if (order.status == 'pending') {
-            debugPrint('✅ Ordem ${order.id} foi PAGA! Atualizando status...');
-            await orderProvider.updateOrderStatus(orderId: order.id, status: 'payment_received');
-            updated++;
-          }
-        } else if (order.paymentHash != null && 
-                   order.paymentHash!.isNotEmpty && 
-                   !paidHashes.contains(order.paymentHash) &&
-                   order.status == 'payment_received') {
-          // Ordem marcada como paga mas não está na carteira - pode ser erro
-          debugPrint('⚠️ Ordem ${order.id} marcada como paga mas NÃO encontrada na carteira!');
-        }
-      }
+      final pendingReconciled = result['pendingReconciled'] ?? 0;
+      final completedReconciled = result['completedReconciled'] ?? 0;
       
-      if (updated > 0) {
-        debugPrint('🎉 $updated ordens atualizadas automaticamente!');
+      if (pendingReconciled > 0 || completedReconciled > 0) {
+        debugPrint('🎉 Reconciliação concluída: $pendingReconciled pending→paid, $completedReconciled awaiting→completed');
         // Recarregar ordens para refletir mudanças
         await orderProvider.fetchOrders();
+      } else {
+        debugPrint('✅ Nenhuma ordem precisou ser reconciliada');
       }
       
     } catch (e) {
@@ -152,8 +132,8 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
   /// Alias para _loadOrdersWithAutoReconcile (mantém compatibilidade)
   Future<void> _loadOrders() => _loadOrdersWithAutoReconcile();
 
-  /// Verificar se há pagamentos recebidos que não foram associados a ordens pendentes
-  Future<void> _checkPendingPayments() async {
+  /// RECONCILIAÇÃO FORÇADA - Verifica TODOS os pagamentos e atualiza TODAS as ordens
+  Future<void> _forceReconcileAllOrders() async {
     if (!mounted) return;
     
     // Mostrar loading
@@ -165,7 +145,7 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
           children: [
             CircularProgressIndicator(),
             SizedBox(width: 20),
-            Text('Verificando pagamentos...'),
+            Expanded(child: Text('Analisando pagamentos e ordens...')),
           ],
         ),
       ),
@@ -175,52 +155,57 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
       final breezProvider = context.read<BreezProvider>();
       final orderProvider = context.read<OrderProvider>();
       
-      // Buscar pagamentos recentes do Breez
       if (!breezProvider.isInitialized) {
-        Navigator.pop(context); // Fechar loading
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('⚠️ Carteira não inicializada'),
+            content: Text('⚠️ Carteira não inicializada. Aguarde...'),
             backgroundColor: Colors.orange,
           ),
         );
         return;
       }
       
-      // Obter lista de pagamentos do Breez - INCLUIR paymentHash
-      final payments = await breezProvider.listPayments();
+      // Buscar TODOS os pagamentos do Breez
+      final payments = await breezProvider.getAllPayments();
       
-      // Converter para formato esperado pelo reconcilePendingOrdersWithBreez
-      final paymentsWithDetails = payments.map((p) {
-        return {
-          'amount': int.tryParse(p['amount']?.toString() ?? '0') ?? 0,
-          'paymentHash': p['paymentHash'] as String?,
-        };
-      }).toList();
+      if (payments.isEmpty) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('📭 Nenhum pagamento encontrado na carteira'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
       
-      // Reconciliar (agora usa apenas paymentHash para match)
-      final reconciled = await orderProvider.reconcilePendingOrdersWithBreez(paymentsWithDetails);
+      // Usar reconciliação FORÇADA
+      final result = await orderProvider.forceReconcileAllOrders(payments);
       
-      Navigator.pop(context); // Fechar loading
+      Navigator.pop(context);
       
-      if (reconciled > 0) {
+      final updated = result['updated'] ?? 0;
+      
+      if (updated > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✅ $reconciled ordem(s) atualizada(s)!'),
+            content: Text('✅ $updated ordem(s) atualizada(s) automaticamente!'),
             backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
           ),
         );
         _loadOrders(); // Recarregar lista
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('ℹ️ Nenhuma ordem pendente com pagamento correspondente'),
+            content: Text('ℹ️ Nenhuma ordem precisou ser atualizada'),
             backgroundColor: Colors.blue,
           ),
         );
       }
     } catch (e) {
-      Navigator.pop(context); // Fechar loading
+      Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('❌ Erro: $e'),
@@ -228,6 +213,12 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
         ),
       );
     }
+  }
+
+  /// Verificar se há pagamentos recebidos que não foram associados a ordens pendentes
+  Future<void> _checkPendingPayments() async {
+    // Redirecionar para reconciliação forçada
+    await _forceReconcileAllOrders();
   }
 
   /// Mostra diagnóstico completo de pagamentos da carteira vs ordens
@@ -452,29 +443,28 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
     if (confirm == true) {
       bool success = false;
       
-      // Se estiver em modo teste, cancelar localmente no OrderProvider
-      if (AppConfig.testMode) {
-        try {
-          final orderProvider = Provider.of<OrderProvider>(context, listen: false);
-          await orderProvider.updateOrderStatusLocal(orderId, 'cancelled');
-          success = true;
-          debugPrint('✅ Ordem $orderId cancelada localmente');
-        } catch (e) {
-          debugPrint('❌ Erro ao cancelar ordem local: $e');
-        }
-      } else {
-        // Produção: cancelar no backend
-        success = await _orderService.cancelOrder(
+      // SEMPRE usar OrderProvider para atualizar status (inclui Nostr)
+      // Isso garante que o cancelamento seja publicado nos relays para outros usuários verem
+      try {
+        final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+        
+        // Atualizar via OrderProvider que publica no Nostr automaticamente
+        success = await orderProvider.updateOrderStatus(
           orderId: orderId,
-          userId: widget.userId,
-          reason: 'Cancelado pelo usuário',
+          status: 'cancelled',
         );
+        
+        if (success) {
+          debugPrint('✅ Ordem $orderId cancelada e publicada no Nostr');
+        }
+      } catch (e) {
+        debugPrint('❌ Erro ao cancelar ordem: $e');
       }
 
       if (success) {
         _loadOrders(); // Recarregar lista
-        // Mostrar modal com instruções de saque
-        _showWithdrawInstructions();
+        // Mostrar confirmação simples
+        _showCancelConfirmation();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -484,6 +474,70 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
         );
       }
     }
+  }
+
+  void _showCancelConfirmation() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green, size: 28),
+            const SizedBox(width: 10),
+            const Text('Ordem Cancelada'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.green.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.green.withOpacity(0.3)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.check, color: Colors.green),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Sua ordem foi cancelada com sucesso!',
+                      style: TextStyle(
+                        color: Colors.green,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Nenhum Bro poderá mais aceitar esta ordem.',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Seus sats continuam seguros na sua carteira.',
+              style: TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showWithdrawInstructions() {
@@ -1586,13 +1640,13 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
     switch (status) {
       case 'pending':
         return {
-          'label': 'Aguardando Pagamento',
-          'color': Colors.orange,
-          'icon': Icons.payment,
+          'label': 'Aguardando Bro',
+          'color': Colors.blue,
+          'icon': Icons.hourglass_empty,
         };
       case 'payment_received':
         return {
-          'label': 'Pagamento Recebido ✓',
+          'label': 'Saldo Reservado ✓',
           'color': Colors.teal,
           'icon': Icons.check,
         };

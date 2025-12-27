@@ -31,23 +31,21 @@ class ProviderBalanceProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      if (AppConfig.testMode) {
-        await _loadSavedBalance();
-        
-        // Se não tem saldo, criar um novo vazio
-        if (_balance == null || _balance!.providerId != providerId) {
-          _balance = ProviderBalance(
-            providerId: providerId,
-            availableBalanceSats: 0,
-            totalEarnedSats: 0,
-            transactions: [],
-            updatedAt: DateTime.now(),
-          );
-          await _saveBalance();
-          debugPrint('💰 Novo saldo criado para provedor $providerId');
-        } else {
-          debugPrint('💰 Saldo carregado: ${_balance!.availableBalanceSats} sats');
-        }
+      await _loadSavedBalance();
+      
+      // Se não tem saldo, criar um novo vazio
+      if (_balance == null || _balance!.providerId != providerId) {
+        _balance = ProviderBalance(
+          providerId: providerId,
+          availableBalanceSats: 0,
+          totalEarnedSats: 0,
+          transactions: [],
+          updatedAt: DateTime.now(),
+        );
+        await _saveBalance();
+        debugPrint('💰 Novo saldo criado para provedor $providerId');
+      } else {
+        debugPrint('💰 Saldo carregado: ${_balance!.availableBalanceSats} sats');
       }
 
       _isLoading = false;
@@ -78,7 +76,7 @@ class ProviderBalanceProvider with ChangeNotifier {
 
   /// Salvar saldo no SharedPreferences
   Future<void> _saveBalance() async {
-    if (_balance == null || !AppConfig.testMode) return;
+    if (_balance == null) return;
     
     try {
       final prefs = await SharedPreferences.getInstance();
