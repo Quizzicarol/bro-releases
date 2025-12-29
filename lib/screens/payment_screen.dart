@@ -99,6 +99,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   Future<void> _processBill(String code) async {
     debugPrint('📝 _processBill iniciado - _isProcessing antes: $_isProcessing');
+    if (!mounted) return;
     setState(() {
       _isProcessing = true;
       _billData = null;
@@ -126,12 +127,15 @@ class _PaymentScreenState extends State<PaymentScreen> {
         result = await orderProvider.validateBoleto(cleanCode);
         billType = result != null ? (result['type'] as String? ?? 'boleto') : 'boleto';
       } else {
+        if (!mounted) return;
         _showError('Código inválido. Use um código PIX ou linha digitável de boleto.');
         return;
       }
 
       debugPrint('📨 Resposta da API: $result');
 
+      if (!mounted) return;
+      
       if (result != null && result['success'] == true) {
         debugPrint('✅ Decodificação bem-sucedida: $result');
         
@@ -152,6 +156,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
         final conversion = await orderProvider.convertPrice(amount);
         debugPrint('📊 Resposta do convertPrice: $conversion');
 
+        if (!mounted) return;
+        
         if (conversion != null && conversion['success'] == true) {
           setState(() {
             _conversionData = conversion;
@@ -167,12 +173,15 @@ class _PaymentScreenState extends State<PaymentScreen> {
         _showError('Código inválido ou não reconhecido');
       }
     } catch (e) {
+      if (!mounted) return;
       _showError('Erro ao processar: $e');
     } finally {
       debugPrint('🔓 _processBill finally - resetando _isProcessing');
-      setState(() {
-        _isProcessing = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
+      }
       debugPrint('✅ _isProcessing setado para FALSE');
     }
   }

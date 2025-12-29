@@ -270,21 +270,29 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadData() async {
-    final breezProvider = context.read<BreezProvider>();
-    final orderProvider = context.read<OrderProvider>();
+    try {
+      final breezProvider = context.read<BreezProvider>();
+      final orderProvider = context.read<OrderProvider>();
 
-    // Mostrar mensagem de progresso
-    _showSyncSnackbar('🔄 Conectando com a rede Nostr...');
-    
-    await Future.wait([
-      breezProvider.refresh(),
-      orderProvider.fetchOrders(),
-    ]);
-    
-    // Mostrar conclusão
-    if (mounted) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      _showSyncSnackbar('✅ Dados atualizados!', duration: const Duration(seconds: 1));
+      // Mostrar mensagem de progresso
+      _showSyncSnackbar('🔄 Conectando com a rede Nostr...');
+      
+      await Future.wait([
+        breezProvider.refresh(),
+        orderProvider.fetchOrders(),
+      ]);
+      
+      // Mostrar conclusão
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        _showSyncSnackbar('✅ Dados atualizados!', duration: const Duration(seconds: 1));
+      }
+    } catch (e) {
+      debugPrint('❌ Erro no _loadData: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        _showSyncSnackbar('⚠️ Falha ao atualizar dados', duration: const Duration(seconds: 2));
+      }
     }
   }
   
@@ -332,25 +340,28 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: _buildAppBar(),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          await _loadData();
-          await _fetchBitcoinPrice();
-        },
-        backgroundColor: const Color(0xFF1A1A1A),
-        color: const Color(0xFFFF6B6B),
-        child: Consumer2<BreezProvider, OrderProvider>(
-          builder: (context, breezProvider, orderProvider, child) {
-            if (breezProvider.isLoading || orderProvider.isLoading) {
-              return const Center(
-                child: CircularProgressIndicator(
-                  color: Color(0xFFFF6B6B),
-                ),
-              );
-            }
-
-            return _buildContent(breezProvider, orderProvider);
+      body: SafeArea(
+        top: false, // AppBar já lida com safe area superior
+        child: RefreshIndicator(
+          onRefresh: () async {
+            await _loadData();
+            await _fetchBitcoinPrice();
           },
+          backgroundColor: const Color(0xFF1A1A1A),
+          color: const Color(0xFFFF6B6B),
+          child: Consumer2<BreezProvider, OrderProvider>(
+            builder: (context, breezProvider, orderProvider, child) {
+              if (breezProvider.isLoading || orderProvider.isLoading) {
+                return const Center(
+                  child: CircularProgressIndicator(
+                    color: Color(0xFFFF6B6B),
+                  ),
+                );
+              }
+
+              return _buildContent(breezProvider, orderProvider);
+            },
+          ),
         ),
       ),
     );

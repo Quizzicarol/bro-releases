@@ -223,34 +223,37 @@ class _ProviderOrdersScreenState extends State<ProviderOrdersScreen> with Single
           ],
         ),
       ),
-      body: Consumer2<CollateralProvider, OrderProvider>(
-        builder: (context, collateralProvider, orderProvider, child) {
-          if (_isLoading) {
-            return const Center(
-              child: CircularProgressIndicator(color: Colors.orange),
+      body: SafeArea(
+        top: false, // AppBar já lida com safe area superior
+        child: Consumer2<CollateralProvider, OrderProvider>(
+          builder: (context, collateralProvider, orderProvider, child) {
+            if (_isLoading) {
+              return const Center(
+                child: CircularProgressIndicator(color: Colors.orange),
+              );
+            }
+            
+            if (!AppConfig.providerTestMode && !_hasCollateral && !collateralProvider.hasCollateral) {
+              return _buildNoCollateralView();
+            }
+
+            if (_error != null) {
+              return _buildErrorView();
+            }
+
+            return TabBarView(
+              controller: _tabController,
+              children: [
+                // Tab 1: Ordens Disponíveis
+                _buildAvailableOrdersTab(collateralProvider),
+                // Tab 2: Minhas Ordens
+                _buildMyOrdersTab(),
+                // Tab 3: Estatísticas
+                _buildStatisticsTab(collateralProvider),
+              ],
             );
-          }
-          
-          if (!AppConfig.providerTestMode && !_hasCollateral && !collateralProvider.hasCollateral) {
-            return _buildNoCollateralView();
-          }
-
-          if (_error != null) {
-            return _buildErrorView();
-          }
-
-          return TabBarView(
-            controller: _tabController,
-            children: [
-              // Tab 1: Ordens Disponíveis
-              _buildAvailableOrdersTab(collateralProvider),
-              // Tab 2: Minhas Ordens
-              _buildMyOrdersTab(),
-              // Tab 3: Estatísticas
-              _buildStatisticsTab(collateralProvider),
-            ],
-          );
-        },
+          },
+        ),
       ),
     );
   }

@@ -872,6 +872,7 @@ class NostrOrderService {
     required String description,
     required int priceSats,
     required String category,
+    String? siteUrl,
   }) async {
     try {
       final keychain = Keychain(privateKey);
@@ -885,19 +886,27 @@ class NostrOrderService {
         'description': description,
         'priceSats': priceSats,
         'category': category,
+        'siteUrl': siteUrl,
         'createdAt': DateTime.now().toIso8601String(),
       });
 
+      final tags = [
+        ['d', offerId],
+        ['t', marketplaceTag],
+        ['t', 'bro-app'],
+        ['t', category],
+        ['title', title],
+        ['price', priceSats.toString(), 'sats'],
+      ];
+      
+      // Adicionar tag de site se fornecido
+      if (siteUrl != null && siteUrl.isNotEmpty) {
+        tags.add(['r', siteUrl]); // NIP-12 reference tag
+      }
+
       final event = Event.from(
         kind: kindMarketplaceOffer,
-        tags: [
-          ['d', offerId],
-          ['t', marketplaceTag],
-          ['t', 'bro-app'],
-          ['t', category],
-          ['title', title],
-          ['price', priceSats.toString(), 'sats'],
-        ],
+        tags: tags,
         content: content,
         privkey: keychain.private,
       );

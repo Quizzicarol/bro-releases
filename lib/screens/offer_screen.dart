@@ -78,26 +78,27 @@ class _OfferScreenState extends State<OfferScreen> {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Info box
-              _buildInfoBox(),
-              const SizedBox(height: 24),
+      body: SafeArea(
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Info box
+                _buildInfoBox(),
+                const SizedBox(height: 24),
 
-              // Categoria
-              const Text(
-                'Categoria',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
+                // Categoria
+                const Text(
+                  'Categoria',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
                 ),
-              ),
               const SizedBox(height: 12),
               _buildCategorySelector(),
               const SizedBox(height: 24),
@@ -532,7 +533,7 @@ class _OfferScreenState extends State<OfferScreen> {
   }
 
   Future<void> _publishOffer() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (_formKey.currentState?.validate() != true) return;
 
     setState(() => _isPublishing = true);
 
