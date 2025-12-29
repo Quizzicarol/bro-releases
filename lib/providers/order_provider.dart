@@ -639,7 +639,7 @@ class OrderProvider with ChangeNotifier {
     }
   }
 
-  // Atualizar status local (modo teste)
+  // Atualizar status local E publicar no Nostr
   Future<void> updateOrderStatusLocal(String orderId, String status) async {
     final index = _orders.indexWhere((o) => o.id == orderId);
     if (index != -1) {
@@ -647,6 +647,28 @@ class OrderProvider with ChangeNotifier {
       await _saveOrders();
       notifyListeners();
       debugPrint('💾 Ordem $orderId atualizada para status: $status');
+      
+      // IMPORTANTE: Publicar atualização no Nostr para sincronização P2P
+      final privateKey = _nostrService.privateKey;
+      if (privateKey != null) {
+        debugPrint('📤 Publicando atualização de status no Nostr (local)...');
+        try {
+          final success = await _nostrOrderService.updateOrderStatus(
+            privateKey: privateKey,
+            orderId: orderId,
+            newStatus: status,
+          );
+          if (success) {
+            debugPrint('✅ Status publicado no Nostr');
+          } else {
+            debugPrint('⚠️ Falha ao publicar status no Nostr');
+          }
+        } catch (e) {
+          debugPrint('❌ Erro ao publicar no Nostr: $e');
+        }
+      } else {
+        debugPrint('⚠️ Sem privateKey Nostr para publicar status');
+      }
     }
   }
 

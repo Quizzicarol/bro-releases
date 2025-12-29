@@ -14,7 +14,7 @@ import 'screens/platform_balance_screen.dart';
 import 'screens/platform_admin_screen.dart';
 import 'screens/order_status_screen.dart';
 import 'screens/user_orders_screen.dart';
-import 'screens/nostr_messages_screen.dart';
+import 'screens/nostr_conversations_screen.dart';
 import 'screens/relay_management_screen.dart';
 import 'screens/nostr_profile_screen.dart';
 import 'screens/nip06_backup_screen.dart';
@@ -256,7 +256,7 @@ class BroApp extends StatelessWidget {
             },
             routes: {
               '/settings': (context) => const SettingsScreen(),
-              '/nostr-messages': (context) => const NostrMessagesScreen(),
+              '/nostr-messages': (context) => const NostrConversationsScreen(),
               '/relay-management': (context) => const RelayManagementScreen(),
               '/nostr-profile': (context) => const NostrProfileScreen(),
               '/nip06-backup': (context) => const Nip06BackupScreen(),
