@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/nostr_service.dart';
+import '../services/nostr_order_service.dart';
 import '../services/bitcoin_price_service.dart';
 
 /// Tela do Marketplace para ver ofertas publicadas no Nostr
@@ -14,6 +15,7 @@ class MarketplaceScreen extends StatefulWidget {
 
 class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTickerProviderStateMixin {
   final NostrService _nostrService = NostrService();
+  final NostrOrderService _nostrOrderService = NostrOrderService();
   
   late TabController _tabController;
   
@@ -67,19 +69,38 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
   Future<void> _loadOffers() async {
     try {
       final myPubkey = _nostrService.publicKey;
+      debugPrint('🔍 Carregando ofertas do marketplace...');
+      debugPrint('   Minha pubkey: ${myPubkey?.substring(0, 8) ?? "null"}');
       
-      // Buscar eventos do tipo 30019 (NIP-15 Classifieds)
-      // Por enquanto, usar dados de exemplo enquanto implementamos a busca real
-      final sampleOffers = _generateSampleOffers();
+      // Buscar ofertas do Nostr
+      final nostrOffers = await _nostrOrderService.fetchMarketplaceOffers();
+      debugPrint('📦 ${nostrOffers.length} ofertas do Nostr');
+      
+      // Converter para MarketplaceOffer
+      final allOffers = nostrOffers.map((data) => MarketplaceOffer(
+        id: data['id'] ?? '',
+        title: data['title'] ?? '',
+        description: data['description'] ?? '',
+        priceSats: data['priceSats'] ?? 0,
+        priceDiscount: 0,
+        category: data['category'] ?? 'outros',
+        sellerPubkey: data['sellerPubkey'] ?? '',
+        sellerName: 'Usuário ${(data['sellerPubkey'] ?? '').toString().substring(0, 6)}',
+        createdAt: DateTime.tryParse(data['createdAt'] ?? '') ?? DateTime.now(),
+      )).toList();
+      
+      // Se não tem ofertas do Nostr, usar exemplos
+      final finalOffers = allOffers.isEmpty ? _generateSampleOffers() : allOffers;
       
       if (mounted) {
         setState(() {
-          _offers = sampleOffers.where((o) => o.sellerPubkey != myPubkey).toList();
-          _myOffers = sampleOffers.where((o) => o.sellerPubkey == myPubkey).toList();
+          _offers = finalOffers.where((o) => o.sellerPubkey != myPubkey).toList();
+          _myOffers = finalOffers.where((o) => o.sellerPubkey == myPubkey).toList();
         });
+        debugPrint('✅ ${_offers.length} ofertas de outros, ${_myOffers.length} minhas ofertas');
       }
     } catch (e) {
-      debugPrint('Erro ao carregar ofertas: $e');
+      debugPrint('❌ Erro ao carregar ofertas: $e');
     }
   }
 
@@ -884,13 +905,32 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
   }) async {
     try {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Publicando oferta...')),
+        const SnackBar(content: Text('Publicando oferta no Nostr...')),
       );
+      
+      // Pegar chave privada
+      final privateKey = _nostrService.privateKey;
+      if (privateKey == null) {
+        throw Exception('Chave privada não disponível');
+      }
+      
+      // Publicar no Nostr
+      final offerId = await _nostrOrderService.publishMarketplaceOffer(
+        privateKey: privateKey,
+        title: title,
+        description: description,
+        priceSats: priceSats,
+        category: category,
+      );
+      
+      if (offerId == null) {
+        throw Exception('Falha ao publicar nos relays');
+      }
       
       // Criar oferta localmente
       final myPubkey = _nostrService.publicKey ?? 'unknown';
       final newOffer = MarketplaceOffer(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        id: offerId,
         title: title,
         description: description,
         priceSats: priceSats,
@@ -906,13 +946,10 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
         _myOffers.insert(0, newOffer);
       });
       
-      // TODO: Publicar no Nostr (kind 30019)
-      await Future.delayed(const Duration(milliseconds: 500));
-      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Oferta publicada com sucesso!'),
+            content: Text('✅ Oferta publicada no Nostr!'),
             backgroundColor: Colors.green,
           ),
         );
@@ -921,9 +958,12 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
         _tabController.animateTo(1);
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red),
-      );
+      debugPrint('❌ Erro ao criar oferta: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 

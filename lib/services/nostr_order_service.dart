@@ -857,4 +857,171 @@ class NostrOrderService {
     debugPrint('❌ Tier não encontrado no Nostr');
     return null;
   }
+
+  // ============================================
+  // MARKETPLACE - Ofertas NIP-15 like
+  // ============================================
+  
+  static const int kindMarketplaceOffer = 30019; // NIP-15 Classifieds
+  static const String marketplaceTag = 'bro-marketplace';
+
+  /// Publica uma oferta no marketplace
+  Future<String?> publishMarketplaceOffer({
+    required String privateKey,
+    required String title,
+    required String description,
+    required int priceSats,
+    required String category,
+  }) async {
+    try {
+      final keychain = Keychain(privateKey);
+      final offerId = const Uuid().v4();
+      
+      final content = jsonEncode({
+        'type': 'bro_marketplace_offer',
+        'version': '1.0',
+        'offerId': offerId,
+        'title': title,
+        'description': description,
+        'priceSats': priceSats,
+        'category': category,
+        'createdAt': DateTime.now().toIso8601String(),
+      });
+
+      final event = Event.from(
+        kind: kindMarketplaceOffer,
+        tags: [
+          ['d', offerId],
+          ['t', marketplaceTag],
+          ['t', 'bro-app'],
+          ['t', category],
+          ['title', title],
+          ['price', priceSats.toString(), 'sats'],
+        ],
+        content: content,
+        privkey: keychain.private,
+      );
+
+      debugPrint('📤 Publicando oferta "$title" nos relays...');
+      
+      int successCount = 0;
+      for (final relay in _relays.take(3)) {
+        try {
+          final success = await _publishToRelay(relay, event);
+          if (success) {
+            successCount++;
+            debugPrint('✅ Publicado em $relay');
+          }
+        } catch (e) {
+          debugPrint('⚠️ Falha em $relay: $e');
+        }
+      }
+
+      debugPrint('✅ Oferta publicada em $successCount relays');
+      return successCount > 0 ? offerId : null;
+    } catch (e) {
+      debugPrint('❌ Erro ao publicar oferta: $e');
+      return null;
+    }
+  }
+
+  /// Busca ofertas do marketplace
+  Future<List<Map<String, dynamic>>> fetchMarketplaceOffers() async {
+    final offers = <Map<String, dynamic>>[];
+    final seenIds = <String>{};
+
+    debugPrint('🔍 Buscando ofertas do marketplace...');
+
+    for (final relay in _relays.take(3)) {
+      try {
+        final events = await _fetchFromRelay(
+          relay,
+          kinds: [kindMarketplaceOffer],
+          tags: {'#t': [marketplaceTag]},
+          limit: 50,
+        );
+        
+        debugPrint('   $relay: ${events.length} ofertas');
+        
+        for (final event in events) {
+          final id = event['id'];
+          if (!seenIds.contains(id)) {
+            seenIds.add(id);
+            
+            // Parse content
+            try {
+              final content = event['parsedContent'] ?? jsonDecode(event['content']);
+              offers.add({
+                'id': content['offerId'] ?? id,
+                'title': content['title'] ?? '',
+                'description': content['description'] ?? '',
+                'priceSats': content['priceSats'] ?? 0,
+                'category': content['category'] ?? 'outros',
+                'sellerPubkey': event['pubkey'],
+                'createdAt': DateTime.fromMillisecondsSinceEpoch(
+                  (event['created_at'] as int) * 1000,
+                ).toIso8601String(),
+              });
+            } catch (e) {
+              debugPrint('⚠️ Erro ao parsear oferta: $e');
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Falha ao buscar de $relay: $e');
+      }
+    }
+
+    debugPrint('✅ Total: ${offers.length} ofertas do marketplace');
+    return offers;
+  }
+
+  /// Busca ofertas de um usuário específico
+  Future<List<Map<String, dynamic>>> fetchUserMarketplaceOffers(String pubkey) async {
+    final offers = <Map<String, dynamic>>[];
+    final seenIds = <String>{};
+
+    debugPrint('🔍 Buscando ofertas do usuário ${pubkey.substring(0, 8)}...');
+
+    for (final relay in _relays.take(3)) {
+      try {
+        final events = await _fetchFromRelay(
+          relay,
+          kinds: [kindMarketplaceOffer],
+          authors: [pubkey],
+          tags: {'#t': [marketplaceTag]},
+          limit: 50,
+        );
+        
+        for (final event in events) {
+          final id = event['id'];
+          if (!seenIds.contains(id)) {
+            seenIds.add(id);
+            
+            try {
+              final content = event['parsedContent'] ?? jsonDecode(event['content']);
+              offers.add({
+                'id': content['offerId'] ?? id,
+                'title': content['title'] ?? '',
+                'description': content['description'] ?? '',
+                'priceSats': content['priceSats'] ?? 0,
+                'category': content['category'] ?? 'outros',
+                'sellerPubkey': event['pubkey'],
+                'createdAt': DateTime.fromMillisecondsSinceEpoch(
+                  (event['created_at'] as int) * 1000,
+                ).toIso8601String(),
+              });
+            } catch (e) {
+              debugPrint('⚠️ Erro ao parsear oferta: $e');
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Falha ao buscar de $relay: $e');
+      }
+    }
+
+    debugPrint('✅ ${offers.length} ofertas do usuário');
+    return offers;
+  }
 }
