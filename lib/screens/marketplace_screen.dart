@@ -125,13 +125,13 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
       ),
       MarketplaceOffer(
         id: '4',
-        title: 'Gift Card Amazon por sats',
-        description: 'Troco gift cards da Amazon (R\$50, R\$100, R\$200) por satoshis.',
-        priceSats: 0,
-        priceDiscount: 10,
-        category: 'gift_cards',
+        title: 'Camiseta Bitcoin por sats',
+        description: 'Vendo camisetas Bitcoin de qualidade. Tamanhos P, M, G, GG.',
+        priceSats: 50000,
+        priceDiscount: 0,
+        category: 'produtos',
         sellerPubkey: 'npub1example4...',
-        sellerName: 'Gift Master',
+        sellerName: 'BTC Store',
         createdAt: DateTime.now().subtract(const Duration(days: 2)),
         imageUrl: null,
       ),
@@ -693,7 +693,6 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
     final descriptionController = TextEditingController();
     final satsController = TextEditingController();
     String selectedCategory = 'venda_sats';
-    int discount = 0;
 
     showModalBottomSheet(
       context: context,
@@ -703,13 +702,14 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
       ),
       isScrollControlled: true,
       builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: EdgeInsets.only(
-            left: 24,
-            right: 24,
-            top: 24,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-          ),
+        builder: (context, setSheetState) => SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: 24,
+              right: 24,
+              top: 24,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 48,
+            ),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -756,7 +756,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
                     DropdownMenuItem(value: 'venda_sats', child: Text('Venda de Sats', style: TextStyle(color: Colors.white))),
                     DropdownMenuItem(value: 'compra_sats', child: Text('Compra de Sats', style: TextStyle(color: Colors.white))),
                     DropdownMenuItem(value: 'servicos', child: Text('Serviços', style: TextStyle(color: Colors.white))),
-                    DropdownMenuItem(value: 'gift_cards', child: Text('Gift Cards', style: TextStyle(color: Colors.white))),
+                    DropdownMenuItem(value: 'produtos', child: Text('Produtos', style: TextStyle(color: Colors.white))),
                     DropdownMenuItem(value: 'outros', child: Text('Outros', style: TextStyle(color: Colors.white))),
                   ],
                   onChanged: (value) {
@@ -823,44 +823,6 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
-                
-                // Desconto/Premium
-                const Text('Desconto/Premium (%)', style: TextStyle(color: Colors.white70)),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Slider(
-                        value: discount.toDouble(),
-                        min: -20,
-                        max: 20,
-                        divisions: 40,
-                        activeColor: discount > 0 ? Colors.green : (discount < 0 ? Colors.red : Colors.orange),
-                        label: discount > 0 ? '-$discount% (desconto)' : (discount < 0 ? '+${-discount}% (premium)' : '0%'),
-                        onChanged: (value) {
-                          setSheetState(() => discount = value.round());
-                        },
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: discount > 0 
-                            ? Colors.green.withOpacity(0.2) 
-                            : (discount < 0 ? Colors.red.withOpacity(0.2) : Colors.grey.withOpacity(0.2)),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        discount > 0 ? '-$discount%' : (discount < 0 ? '+${-discount}%' : '0%'),
-                        style: TextStyle(
-                          color: discount > 0 ? Colors.green : (discount < 0 ? Colors.red : Colors.white),
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
                 const SizedBox(height: 24),
                 
                 // Botões
@@ -894,7 +856,6 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
                             description: descriptionController.text,
                             priceSats: int.tryParse(satsController.text) ?? 0,
                             category: selectedCategory,
-                            discount: discount,
                           );
                         },
                         style: ElevatedButton.styleFrom(
@@ -910,6 +871,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
             ),
           ),
         ),
+        ),
       ),
     );
   }
@@ -919,25 +881,45 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
     required String description,
     required int priceSats,
     required String category,
-    required int discount,
   }) async {
     try {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Publicando oferta...')),
       );
       
-      // TODO: Implementar publicação real via Nostr (kind 30019)
-      // Por enquanto, apenas simular
-      await Future.delayed(const Duration(seconds: 1));
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Oferta publicada com sucesso!'),
-          backgroundColor: Colors.green,
-        ),
+      // Criar oferta localmente
+      final myPubkey = _nostrService.publicKey ?? 'unknown';
+      final newOffer = MarketplaceOffer(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        title: title,
+        description: description,
+        priceSats: priceSats,
+        priceDiscount: 0,
+        category: category,
+        sellerPubkey: myPubkey,
+        sellerName: 'Eu',
+        createdAt: DateTime.now(),
       );
       
-      _loadData();
+      // Adicionar à lista de minhas ofertas
+      setState(() {
+        _myOffers.insert(0, newOffer);
+      });
+      
+      // TODO: Publicar no Nostr (kind 30019)
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Oferta publicada com sucesso!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        
+        // Ir para aba Minhas Ofertas
+        _tabController.animateTo(1);
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red),
@@ -1016,10 +998,10 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
           'icon': Icons.work,
           'color': Colors.purple,
         };
-      case 'gift_cards':
+      case 'produtos':
         return {
-          'label': 'GIFT CARDS',
-          'icon': Icons.card_giftcard,
+          'label': 'PRODUTOS',
+          'icon': Icons.shopping_bag,
           'color': Colors.pink,
         };
       default:
