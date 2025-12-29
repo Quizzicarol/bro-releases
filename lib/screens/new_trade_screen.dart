@@ -26,80 +26,78 @@ class NewTradeScreen extends StatelessWidget {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Guia rapido
-            _buildQuickGuide(),
-            const SizedBox(height: 24),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Guia rapido
+              _buildQuickGuide(),
+              const SizedBox(height: 24),
 
-            // Opcoes
-            const Text(
-              'O que voce quer fazer?',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
+              // Opcoes
+              const Text(
+                'O que voce quer fazer?',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
 
-            // Opcao 1: Oferecer produto/servico
-            _buildOptionCard(
-              context,
-              icon: Icons.sell,
-              iconColor: const Color(0xFF3DE98C),
-              gradientColors: [const Color(0xFF3DE98C), const Color(0xFF00CC7A)],
-              title: 'Oferecer Produto ou Servico',
-              description: 'Anuncie algo que voce quer vender ou um servico que oferece. Receba em sats!',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const OfferScreen()),
-                );
-              },
-            ),
-            const SizedBox(height: 16),
+              // Opcao 1: Oferecer produto/servico
+              _buildOptionCard(
+                context,
+                icon: Icons.sell,
+                iconColor: const Color(0xFF3DE98C),
+                gradientColors: [const Color(0xFF3DE98C), const Color(0xFF00CC7A)],
+                title: 'Oferecer Produto ou Servico',
+                description: 'Anuncie algo que voce quer vender ou um servico que oferece. Receba em sats!',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const OfferScreen()),
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
 
-            // Opcao 2: Pagar uma conta
-            _buildOptionCard(
-              context,
-              icon: Icons.receipt_long,
-              iconColor: const Color(0xFFFF6B6B),
-              gradientColors: [const Color(0xFFFF6B6B), const Color(0xFFFF8A8A)],
-              title: 'Pagar uma Conta',
-              description: 'Cole um codigo PIX ou boleto. Um Bro vai te ajudar a pagar!',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const PaymentScreen()),
-                );
-              },
-            ),
-            const SizedBox(height: 16),
+              // Opcao 2: Pagar uma conta
+              _buildOptionCard(
+                context,
+                icon: Icons.receipt_long,
+                iconColor: const Color(0xFFFF6B6B),
+                gradientColors: [const Color(0xFFFF6B6B), const Color(0xFFFF8A8A)],
+                title: 'Pagar uma Conta',
+                description: 'Cole um codigo PIX ou boleto. Um Bro vai te ajudar a pagar!',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const PaymentScreen()),
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
 
-            // Opcao 3: Procurar ofertas (futuro)
-            const SizedBox(height: 16),
-            _buildOptionCard(
-              context,
-              icon: Icons.search,
-              iconColor: const Color(0xFF4A90E2),
-              gradientColors: [const Color(0xFF4A90E2), const Color(0xFF5BA3F5)],
-              title: 'Procurar Ofertas',
-              description: 'Veja o que outros Bros estao oferecendo na comunidade.',
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Em breve! Marketplace P2P via Nostr'),
-                    backgroundColor: Color(0xFF4A90E2),
-                  ),
-                );
-              },
-              comingSoon: true,
-            ),
-          ],
+              // Opcao 3: Procurar ofertas
+              const SizedBox(height: 16),
+              _buildOptionCard(
+                context,
+                icon: Icons.search,
+                iconColor: const Color(0xFF4A90E2),
+                gradientColors: [const Color(0xFF4A90E2), const Color(0xFF5BA3F5)],
+                title: 'Procurar Ofertas',
+                description: 'Veja o que outros Bros estao oferecendo na comunidade.',
+                onTap: () {
+                  Navigator.pushNamed(context, '/marketplace');
+                },
+                comingSoon: false,
+              ),
+              const SizedBox(height: 24), // Espaço extra para evitar botões de navegação
+            ],
+          ),
         ),
       ),
     );

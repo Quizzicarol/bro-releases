@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../services/nostr_service.dart';
 import '../services/nostr_order_service.dart';
 import '../services/bitcoin_price_service.dart';
+import 'marketplace_chat_screen.dart';
 
 /// Tela do Marketplace para ver ofertas publicadas no Nostr
 /// Utiliza NIP-15 (kind 30019) para listagem de classificados
@@ -94,10 +95,11 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
       
       if (mounted) {
         setState(() {
-          _offers = finalOffers.where((o) => o.sellerPubkey != myPubkey).toList();
+          // Mostrar todas as ofertas na aba principal (incluindo próprias para facilitar teste)
+          _offers = finalOffers.toList();
           _myOffers = finalOffers.where((o) => o.sellerPubkey == myPubkey).toList();
         });
-        debugPrint('✅ ${_offers.length} ofertas de outros, ${_myOffers.length} minhas ofertas');
+        debugPrint('✅ ${_offers.length} ofertas totais, ${_myOffers.length} minhas ofertas');
       }
     } catch (e) {
       debugPrint('❌ Erro ao carregar ofertas: $e');
@@ -622,6 +624,54 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
               const SizedBox(height: 20),
             ],
             
+            // Site ou Referências
+            if (offer.siteUrl != null && offer.siteUrl!.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.link, color: Colors.blue, size: 24),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Site ou Referências',
+                            style: TextStyle(color: Colors.white54, fontSize: 12),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            offer.siteUrl!,
+                            style: const TextStyle(
+                              color: Colors.blue,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: offer.siteUrl!));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Link copiado!')),
+                        );
+                      },
+                      icon: const Icon(Icons.copy, color: Colors.blue),
+                      tooltip: 'Copiar link',
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+            
             // Vendedor
             Container(
               padding: const EdgeInsets.all(16),
@@ -693,7 +743,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
                   text: 'Oferta: ${offer.title}\n'
                         'Preço: ${_formatSats(offer.priceSats)} sats\n'
                         'Vendedor: ${offer.sellerName}\n'
-                        'Pubkey: ${offer.sellerPubkey}',
+                        'Pubkey: ${offer.sellerPubkey}${offer.siteUrl != null ? '\nSite: ${offer.siteUrl}' : ''}',
                 ));
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Oferta copiada!')),
@@ -713,6 +763,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
     final titleController = TextEditingController();
     final descriptionController = TextEditingController();
     final satsController = TextEditingController();
+    final siteController = TextEditingController();
     String selectedCategory = 'venda_sats';
 
     showModalBottomSheet(
@@ -825,6 +876,26 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
                 ),
                 const SizedBox(height: 16),
                 
+                // Site ou Referências
+                const Text('Site ou Referências (opcional)', style: TextStyle(color: Colors.white70)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: siteController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: 'Ex: https://meusite.com ou @meunostr',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                    prefixIcon: const Icon(Icons.link, color: Colors.blue),
+                    filled: true,
+                    fillColor: const Color(0xFF2E2E2E),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                
                 // Quantidade em sats
                 const Text('Quantidade (sats)', style: TextStyle(color: Colors.white70)),
                 const SizedBox(height: 8),
@@ -877,6 +948,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
                             description: descriptionController.text,
                             priceSats: int.tryParse(satsController.text) ?? 0,
                             category: selectedCategory,
+                            siteUrl: siteController.text.trim().isEmpty ? null : siteController.text.trim(),
                           );
                         },
                         style: ElevatedButton.styleFrom(
@@ -902,6 +974,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
     required String description,
     required int priceSats,
     required String category,
+    String? siteUrl,
   }) async {
     try {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -921,6 +994,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
         description: description,
         priceSats: priceSats,
         category: category,
+        siteUrl: siteUrl,
       );
       
       if (offerId == null) {
@@ -939,10 +1013,12 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
         sellerPubkey: myPubkey,
         sellerName: 'Eu',
         createdAt: DateTime.now(),
+        siteUrl: siteUrl,
       );
       
-      // Adicionar à lista de minhas ofertas
+      // Adicionar à lista de ofertas (principal e minhas)
       setState(() {
+        _offers.insert(0, newOffer);
         _myOffers.insert(0, newOffer);
       });
       
@@ -968,52 +1044,15 @@ class _MarketplaceScreenState extends State<MarketplaceScreen> with SingleTicker
   }
 
   void _contactSeller(MarketplaceOffer offer) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: const Text('Contato', style: TextStyle(color: Colors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Para entrar em contato com ${offer.sellerName}, você pode:',
-              style: const TextStyle(color: Colors.white70),
-            ),
-            const SizedBox(height: 16),
-            ListTile(
-              leading: const Icon(Icons.copy, color: Colors.orange),
-              title: const Text('Copiar Pubkey', style: TextStyle(color: Colors.white)),
-              subtitle: Text(
-                '${offer.sellerPubkey.substring(0, 20)}...',
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
-              ),
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: offer.sellerPubkey));
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Pubkey copiada! Use um cliente Nostr para enviar DM.')),
-                );
-              },
-            ),
-            const Divider(color: Colors.white24),
-            const ListTile(
-              leading: Icon(Icons.info_outline, color: Colors.blue),
-              title: Text('Dica', style: TextStyle(color: Colors.white)),
-              subtitle: Text(
-                'Use um cliente Nostr como Damus, Amethyst ou Primal para enviar uma mensagem direta.',
-                style: TextStyle(color: Colors.white54, fontSize: 12),
-              ),
-            ),
-          ],
+    // Abrir chat direto via Nostr DM (NIP-04)
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => MarketplaceChatScreen(
+          recipientPubkey: offer.sellerPubkey,
+          recipientName: offer.sellerName,
+          offerTitle: offer.title,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fechar'),
-          ),
-        ],
       ),
     );
   }
@@ -1090,6 +1129,7 @@ class MarketplaceOffer {
   final String sellerName;
   final DateTime createdAt;
   final String? imageUrl;
+  final String? siteUrl; // Site ou referência externa
 
   MarketplaceOffer({
     required this.id,
@@ -1102,6 +1142,7 @@ class MarketplaceOffer {
     required this.sellerName,
     required this.createdAt,
     this.imageUrl,
+    this.siteUrl,
   });
 
   factory MarketplaceOffer.fromNostrEvent(Map<String, dynamic> event) {
@@ -1157,5 +1198,6 @@ class MarketplaceOffer {
     'sellerName': sellerName,
     'createdAt': createdAt.toIso8601String(),
     'imageUrl': imageUrl,
+    'siteUrl': siteUrl,
   };
 }
