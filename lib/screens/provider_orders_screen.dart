@@ -143,10 +143,9 @@ class _ProviderOrdersScreenState extends State<ProviderOrdersScreen> with Single
           // Minhas ordens (aceitas por mim)
           myOrders.add(orderMap);
         } else if (order.status == 'pending' || order.status == 'payment_received') {
-          // Ordens disponíveis (não aceitas ainda e não são minhas)
-          if (order.userPubkey != _currentPubkey) {
-            available.add(orderMap);
-          }
+          // Ordens disponíveis (não aceitas ainda)
+          // TESTE: Permitir ver próprias ordens para facilitar testes
+          available.add(orderMap);
         }
       }
       
