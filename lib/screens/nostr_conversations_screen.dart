@@ -34,6 +34,7 @@ class _NostrConversationsScreenState extends State<NostrConversationsScreen> {
   List<ConversationInfo> _conversations = [];
   bool _isLoading = true;
   bool _isInitialized = false;
+  String? _myPubkey;
   
   @override
   void initState() {
@@ -57,7 +58,8 @@ class _NostrConversationsScreenState extends State<NostrConversationsScreen> {
         return;
       }
       
-      debugPrint('💬 Conversas: Inicializando chat com pubkey ${publicKey.substring(0, 8)}...');
+      _myPubkey = publicKey;
+      debugPrint('💬 Conversas: Minha pubkey: ${publicKey.substring(0, 16)}...');
       
       // Inicializar chat service
       await _chatService.initialize(privateKey, publicKey);
@@ -66,7 +68,7 @@ class _NostrConversationsScreenState extends State<NostrConversationsScreen> {
         _isInitialized = true;
       });
       
-      // Aguardar mais tempo para receber mensagens dos relays (aumentado de 2 para 4 segundos)
+      // Aguardar mais tempo para receber mensagens dos relays
       debugPrint('💬 Conversas: Aguardando mensagens dos relays...');
       await Future.delayed(const Duration(seconds: 4));
       
@@ -100,10 +102,18 @@ class _NostrConversationsScreenState extends State<NostrConversationsScreen> {
         final messages = _chatService.getMessages(pubkey);
         final lastMessage = messages.isNotEmpty ? messages.last : null;
         
-        debugPrint('   - ${pubkey.substring(0, 8)}...: ${messages.length} mensagens');
+        // Verificar se é conversa consigo mesmo
+        final isSelfChat = pubkey == _myPubkey;
+        
+        debugPrint('   - ${pubkey.substring(0, 8)}...: ${messages.length} mensagens ${isSelfChat ? "(EU MESMO)" : ""}');
         
         // Tentar obter nome salvo
-        final savedName = await _storage.getData('contact_name_$pubkey');
+        String? savedName = await _storage.getData('contact_name_$pubkey');
+        
+        // Se for conversa consigo mesmo e não tem nome, usar "Notas Pessoais"
+        if (isSelfChat && (savedName == null || savedName.isEmpty)) {
+          savedName = '📝 Notas Pessoais (eu mesmo)';
+        }
         
         conversations.add(ConversationInfo(
           pubkey: pubkey,
