@@ -76,11 +76,18 @@ class ChatService {
     _privateKey = privateKey;
     _publicKey = publicKey;
     
-    debugPrint('💬 ChatService: Inicializando com pubkey ${publicKey.substring(0, 8)}...');
+    debugPrint('💬 ChatService: Inicializando com pubkey ${publicKey.substring(0, 16)}...');
+    debugPrint('💬 ChatService: PrivateKey hash: ${privateKey.hashCode}');
     
     // Carregar mensagens do cache local
     await _loadCachedMessages();
     debugPrint('💬 ChatService: ${_messageCache.length} conversas no cache local');
+    
+    // Listar todas as conversas carregadas
+    for (final entry in _messageCache.entries) {
+      final isSelf = entry.key == publicKey;
+      debugPrint('   - ${entry.key.substring(0, 8)}...: ${entry.value.length} msgs ${isSelf ? "(SELF)" : ""}');
+    }
     
     // Conectar aos relays
     int connectedCount = 0;
