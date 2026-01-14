@@ -3,12 +3,55 @@
 
 workflows:
   # ============================================
+  # DISTRIBUIÇÃO PARA TESTERS (SEM LOJA)
+  # Gera APK release assinado para Android
+  # ============================================
+  testers-build:
+    name: 📱 Build para Testers
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    
+    environment:
+      groups:
+        - keystore_credentials
+      flutter: stable
+      java: 17
+      
+    scripts:
+      - name: Set up keystore
+        script: |
+          echo $CM_KEYSTORE | base64 --decode > $CM_BUILD_DIR/android/app/bro-release.jks
+          cat > "$CM_BUILD_DIR/android/key.properties" <<EOF
+          storePassword=$CM_KEYSTORE_PASSWORD
+          keyPassword=$CM_KEY_PASSWORD
+          keyAlias=$CM_KEY_ALIAS
+          storeFile=bro-release.jks
+          EOF
+          
+      - name: Get Flutter packages
+        script: flutter pub get
+        
+      - name: Build APK Release (para distribuir)
+        script: flutter build apk --release
+        
+    artifacts:
+      - build/**/outputs/**/*.apk
+      
+    publishing:
+      email:
+        recipients:
+          - carol@quizzicarol.com
+        notify:
+          success: true
+          failure: true
+
+  # ============================================
   # ANDROID - Google Play Store
   # ============================================
   android-release:
-    name: Android Release
+    name: 🤖 Android Play Store
     max_build_duration: 60
-    instance_type: mac_mini_m1
+    instance_type: mac_mini_m2
     
     environment:
       groups:
@@ -29,19 +72,19 @@ workflows:
     scripts:
       - name: Set up keystore
         script: |
-          echo $CM_KEYSTORE | base64 --decode > $CM_BUILD_DIR/keystore.jks
-          cat >> "$CM_BUILD_DIR/android/key.properties" <<EOF
+          echo $CM_KEYSTORE | base64 --decode > $CM_BUILD_DIR/android/app/bro-release.jks
+          cat > "$CM_BUILD_DIR/android/key.properties" <<EOF
           storePassword=$CM_KEYSTORE_PASSWORD
           keyPassword=$CM_KEY_PASSWORD
           keyAlias=$CM_KEY_ALIAS
-          storeFile=$CM_BUILD_DIR/keystore.jks
+          storeFile=bro-release.jks
           EOF
           
       - name: Get Flutter packages
         script: flutter pub get
         
-      - name: Build APK (debug for testing)
-        script: flutter build apk --debug
+      - name: Build APK Release
+        script: flutter build apk --release
         
       - name: Build AAB (release for Play Store)
         script: flutter build appbundle --release
@@ -61,9 +104,9 @@ workflows:
   # iOS - TestFlight / App Store
   # ============================================
   ios-release:
-    name: iOS Release
+    name: 🍎 iOS TestFlight
     max_build_duration: 90
-    instance_type: mac_mini_m1
+    instance_type: mac_mini_m2
     
     integrations:
       app_store_connect: Bro App
@@ -113,12 +156,12 @@ workflows:
         submit_to_app_store: false
 
   # ============================================
-  # DEBUG BUILD (para testes)
+  # DEBUG BUILD (para desenvolvimento)
   # ============================================
   debug-build:
-    name: Debug Build
+    name: 🔧 Debug Build
     max_build_duration: 60
-    instance_type: mac_mini_m1
+    instance_type: mac_mini_m2
     
     environment:
       flutter: stable
