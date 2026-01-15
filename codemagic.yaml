@@ -3,6 +3,61 @@
 
 workflows:
   # ============================================
+  # BUILD COMPLETO - Android + iOS
+  # ============================================
+  full-release:
+    name: 🚀 Android + iOS (Testers)
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    
+    integrations:
+      app_store_connect: Bro App
+      
+    environment:
+      android_signing:
+        - bro_keystore
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: app.bro.mobile
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      java: 17
+      
+    scripts:
+      - name: Get Flutter packages
+        script: flutter pub get
+        
+      - name: Build APK Release (Android)
+        script: flutter build apk --release
+        
+      - name: Install CocoaPods
+        script: |
+          cd ios
+          pod install
+          
+      - name: Build iOS
+        script: |
+          xcode-project use-profiles
+          flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
+        
+    artifacts:
+      - build/**/outputs/**/*.apk
+      - build/ios/ipa/*.ipa
+      
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: false
+      email:
+        recipients:
+          - carol@quizzicarol.com
+        notify:
+          success: true
+          failure: true
+
+  # ============================================
   # DISTRIBUIÇÃO PARA TESTERS (SEM LOJA)
   # Gera APK release assinado para Android
   # ============================================
