@@ -104,6 +104,28 @@ class OrderProvider with ChangeNotifier {
     
     // Carregar ordens locais primeiro (SEMPRE, para preservar status atualizados)
     await _loadSavedOrders();
+    
+    // SEGURANÇA: Filtrar ordens que não pertencem a este usuário
+    // (podem ter vazado de sincronizações anteriores)
+    final originalCount = _orders.length;
+    _orders = _orders.where((order) {
+      // Manter ordens deste usuário
+      if (order.userPubkey == userPubkey) return true;
+      // Manter ordens sem pubkey definido (legado, mas marcar como deste usuário)
+      if (order.userPubkey == null || order.userPubkey!.isEmpty) {
+        debugPrint('⚠️ Ordem ${order.id.substring(0, 8)} sem userPubkey - removendo por segurança');
+        return false; // Remover ordens sem dono identificado
+      }
+      // Remover ordens de outros usuários
+      debugPrint('🚫 Removendo ordem ${order.id.substring(0, 8)} de outro usuário');
+      return false;
+    }).toList();
+    
+    if (_orders.length < originalCount) {
+      debugPrint('🔐 Removidas ${originalCount - _orders.length} ordens de outros usuários');
+      await _saveOrders(); // Salvar lista limpa
+    }
+    
     debugPrint('📦 ${_orders.length} ordens locais carregadas (para preservar status)');
     
     _isInitialized = true;
@@ -274,6 +296,25 @@ class OrderProvider with ChangeNotifier {
       for (var order in _orders) {
         debugPrint('   - ${order.id.substring(0, 8)}: status="${order.status}", providerId=${order.providerId ?? "null"}, R\$ ${order.amount}');
       }
+    } catch (e) {
+      debugPrint('❌ Erro ao salvar ordens: $e');
+    }
+  }
+  
+  /// SEGURANÇA: Salvar APENAS ordens do usuário atual no SharedPreferences
+  /// Ordens de outros usuários (visualizadas no modo provedor) ficam apenas em memória
+  Future<void> _saveOnlyUserOrders() async {
+    try {
+      // Filtrar apenas ordens do usuário atual
+      final userOrders = _orders.where((o) => 
+        o.userPubkey == _currentUserPubkey || 
+        o.providerId == _currentUserPubkey  // Ordens que este usuário aceitou como provedor
+      ).toList();
+      
+      final prefs = await SharedPreferences.getInstance();
+      final ordersJson = json.encode(userOrders.map((o) => o.toJson()).toList());
+      await prefs.setString(_ordersKey, ordersJson);
+      debugPrint('💾 SEGURO: ${userOrders.length}/${_orders.length} ordens salvas (apenas do usuário atual)');
     } catch (e) {
       debugPrint('❌ Erro ao salvar ordens: $e');
     }
@@ -584,7 +625,10 @@ class OrderProvider with ChangeNotifier {
       // Ordenar por data (mais recente primeiro)
       _orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       
-      await _saveOrders();
+      // SEGURANÇA: NÃO salvar ordens de outros usuários no storage local!
+      // Apenas salvar as ordens que pertencem ao usuário atual
+      // As ordens de outros ficam apenas em memória (para visualização do provedor)
+      await _saveOnlyUserOrders();
       notifyListeners();
       
       debugPrint('✅ [PROVEDOR] Sincronização concluída: ${_orders.length} ordens totais (added: $added, updated: $updated)');
@@ -1344,6 +1388,15 @@ class OrderProvider with ChangeNotifier {
         // (já são filtradas em eventToOrder, mas double-check aqui)
         if (nostrOrder.amount <= 0) {
           debugPrint('⚠️ IGNORANDO ordem ${nostrOrder.id.substring(0, 8)} com amount=0');
+          skipped++;
+          continue;
+        }
+        
+        // SEGURANÇA: Verificar se a ordem realmente pertence ao usuário atual
+        if (nostrOrder.userPubkey != null && 
+            nostrOrder.userPubkey!.isNotEmpty &&
+            nostrOrder.userPubkey != _currentUserPubkey) {
+          debugPrint('🚫 SEGURANÇA: Ordem ${nostrOrder.id.substring(0, 8)} é de outro usuário - ignorando');
           skipped++;
           continue;
         }

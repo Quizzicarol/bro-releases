@@ -104,19 +104,20 @@ class _UserOrdersScreenState extends State<UserOrdersScreen> {
       
       debugPrint('📱 OrderProvider tem ${orderProvider.orders.length} ordens no total');
       
-      // SEGURANÇA: Filtrar apenas ordens do usuário atual!
-      // Isso evita que o usuário veja/modifique ordens de outros
+      // SEGURANÇA: Filtrar APENAS ordens do usuário atual!
+      // NUNCA mostrar ordens de outros usuários
       final currentUserPubkey = widget.userId;
       debugPrint('🔐 Filtrando ordens para usuário: ${currentUserPubkey.substring(0, 8)}...');
       
-      // Mostrar apenas ordens do usuário atual (incluindo canceladas para permitir saque)
+      // Mostrar APENAS ordens onde userPubkey == currentUserPubkey
+      // NÃO incluir ordens sem userPubkey (podem ser de outros usuários)
       final localOrders = orderProvider.orders
         .where((order) {
-          // Se a ordem não tem userPubkey, verificar se foi criada quando este usuário estava logado
-          // (ordens antigas podem não ter userPubkey)
+          // SEGURANÇA: Ordens sem userPubkey NÃO são do usuário atual
+          // (provavelmente vieram do Nostr de outros usuários)
           if (order.userPubkey == null || order.userPubkey!.isEmpty) {
-            debugPrint('⚠️ Ordem ${order.id.substring(0, 8)} sem userPubkey - incluindo como legado');
-            return true; // Incluir ordens legadas que podem ser do usuário
+            debugPrint('🚫 REJEITANDO ordem ${order.id.substring(0, 8)} sem userPubkey (segurança)');
+            return false; // NÃO incluir ordens sem dono identificado
           }
           final isOwner = order.userPubkey == currentUserPubkey;
           if (!isOwner) {
