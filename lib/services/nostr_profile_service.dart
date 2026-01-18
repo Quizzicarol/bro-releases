@@ -138,7 +138,9 @@ class NostrProfileService {
             
             if (data.isNotEmpty && data[0] == 'EVENT' && data.length >= 3) {
               final event = data[2] as Map<String, dynamic>;
-              final content = event['content'] as String?;
+              // Converter content para String de forma segura (pode ser bool em alguns relays!)
+              final rawContent = event['content'];
+              final content = rawContent is String ? rawContent : rawContent?.toString();
               
               if (content != null && content.isNotEmpty) {
                 final profileData = jsonDecode(content) as Map<String, dynamic>;
