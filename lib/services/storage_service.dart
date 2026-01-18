@@ -557,10 +557,16 @@ class StorageService {
           key == 'SEED_BACKUP_EMERGENCY' ||
           key.contains('seed') ||
           key.contains('mnemonic')) {
-        final value = _prefs?.getString(key);
-        if (value != null) {
-          dataToPreserve[key] = value;
-          debugPrint('   💾 Preservando: $key');
+        // IMPORTANTE: Verificar se é realmente String antes de fazer cast
+        try {
+          final rawValue = _prefs?.get(key);
+          final value = rawValue is String ? rawValue : null;
+          if (value != null) {
+            dataToPreserve[key] = value;
+            debugPrint('   💾 Preservando: $key');
+          }
+        } catch (e) {
+          debugPrint('   ⚠️ Ignorando chave $key (não é String)');
         }
       }
     }
