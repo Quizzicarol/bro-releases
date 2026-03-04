@@ -1487,7 +1487,7 @@ class _DisputeDetailScreenState extends State<DisputeDetailScreen> {
     if (_agentAnalysis == null) return const SizedBox.shrink();
 
     final confidence = (_agentAnalysis!['confidence'] ?? 0.0) as num;
-    final recommendation = _agentAnalysis!['recommendation'] ?? '';
+    final recommendation = _agentAnalysis!['suggestion'] ?? '';
     final reason = _agentAnalysis!['reason'] ?? '';
     final tier = _agentAnalysis!['tier'] ?? 0;
 
@@ -1503,17 +1503,17 @@ class _DisputeDetailScreenState extends State<DisputeDetailScreen> {
     String recLabel;
     IconData recIcon;
     switch (recommendation) {
-      case 'refund_buyer':
-        recLabel = 'Reembolsar Comprador';
+      case 'resolved_user':
+        recLabel = 'Favor do Usuário';
         recIcon = Icons.person;
         break;
-      case 'release_to_seller':
-        recLabel = 'Liberar ao Vendedor';
+      case 'resolved_provider':
+        recLabel = 'Favor do Provedor';
         recIcon = Icons.storefront;
         break;
-      case 'split':
-        recLabel = 'Dividir Valor';
-        recIcon = Icons.call_split;
+      case 'escalate':
+        recLabel = 'Escalar para humano';
+        recIcon = Icons.escalator_warning;
         break;
       default:
         recLabel = recommendation;

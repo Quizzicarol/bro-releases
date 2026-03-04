@@ -858,9 +858,9 @@ class _PlatformAdminScreenState extends State<PlatformAdminScreen> {
   Widget _buildAgentSection() {
     final pendingCount = _agentAnalyses.length;
     final stats = _agentStats;
-    final totalAnalyzed = stats?['stats']?['totalAnalyzed'] ?? 0;
-    final autoResolved = stats?['stats']?['autoResolved'] ?? 0;
-    final accuracy = stats?['stats']?['accuracy'];
+    final totalAnalyzed = stats?['total'] ?? 0;
+    final autoResolved = stats?['tiers']?['tier1'] ?? 0;
+    final accuracy = stats?['accuracy'];
 
     return Container(
       width: double.infinity,
@@ -918,7 +918,7 @@ class _PlatformAdminScreenState extends State<PlatformAdminScreen> {
               const SizedBox(width: 8),
               _buildAgentStatPill(
                 'Precisão',
-                accuracy != null ? '${(accuracy * 100).toStringAsFixed(0)}%' : 'N/A',
+                accuracy != null && accuracy != 'N/A' ? '$accuracy' : 'N/A',
                 Colors.amber,
               ),
             ],
@@ -990,9 +990,9 @@ class _PlatformAdminScreenState extends State<PlatformAdminScreen> {
   }
 
   Widget _buildAgentAnalysisCard(Map<String, dynamic> analysis) {
-    final disputeId = analysis['disputeId'] ?? '';
+    final disputeId = analysis['orderId'] ?? '';
     final confidence = (analysis['confidence'] ?? 0.0) as num;
-    final recommendation = analysis['recommendation'] ?? 'unknown';
+    final recommendation = analysis['suggestion'] ?? 'unknown';
     final tier = analysis['tier'] ?? 0;
     final reason = analysis['reason'] ?? '';
     final timestamp = analysis['analyzedAt'] ?? '';
@@ -1025,16 +1025,16 @@ class _PlatformAdminScreenState extends State<PlatformAdminScreen> {
     String recLabel;
     Color recColor;
     switch (recommendation) {
-      case 'refund_buyer':
-        recLabel = 'Reembolsar Comprador';
+      case 'resolved_user':
+        recLabel = 'Favor do Usuário';
         recColor = Colors.blue;
         break;
-      case 'release_to_seller':
-        recLabel = 'Liberar ao Vendedor';
+      case 'resolved_provider':
+        recLabel = 'Favor do Provedor';
         recColor = Colors.green;
         break;
-      case 'split':
-        recLabel = 'Dividir';
+      case 'escalate':
+        recLabel = 'Escalar para humano';
         recColor = Colors.amber;
         break;
       default:
@@ -1200,52 +1200,51 @@ class _PlatformAdminScreenState extends State<PlatformAdminScreen> {
     }
   }
 
-  Future<void> _rejectAnalysis(String disputeId) async {
-    final reason = await showDialog<String>(
+  Future<void> _rejectAnalysis(String orderId) async {
+    final humanDecision = await showDialog<String>(
       context: context,
       builder: (context) {
-        final controller = TextEditingController();
         return AlertDialog(
           backgroundColor: const Color(0xFF1A1A1A),
-          title: const Text('Rejeitar Análise', style: TextStyle(color: Colors.white)),
-          content: TextField(
-            controller: controller,
-            style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              hintText: 'Motivo (opcional)',
-              hintStyle: TextStyle(color: Colors.white38),
-              enabledBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: Colors.white24),
-              ),
-            ),
+          title: const Text('Rejeitar Sugestão do Agente', style: TextStyle(color: Colors.white)),
+          content: const Text(
+            'Qual é a sua decisão como mediador?',
+            style: TextStyle(color: Colors.white70),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('Cancelar'),
             ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              child: const Text('Rejeitar', style: TextStyle(color: Colors.white)),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(context, 'resolved_user'),
+              icon: const Icon(Icons.person, size: 16, color: Colors.white),
+              label: const Text('Favor do Usuário', style: TextStyle(color: Colors.white)),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(context, 'resolved_provider'),
+              icon: const Icon(Icons.storefront, size: 16, color: Colors.white),
+              label: const Text('Favor do Provedor', style: TextStyle(color: Colors.white)),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700),
             ),
           ],
         );
       },
     );
 
-    if (reason == null) return;
+    if (humanDecision == null) return;
 
     setState(() => _agentLoading = true);
     try {
       final success = await ApiService().rejectAgentAnalysis(
-        disputeId,
-        reason: reason.isNotEmpty ? reason : null,
+        orderId,
+        humanDecision: humanDecision,
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(success ? 'Análise rejeitada' : '❌ Falha ao rejeitar'),
+            content: Text(success ? 'Análise rejeitada — decisão humana registrada' : '❌ Falha ao rejeitar'),
             backgroundColor: success ? Colors.orange : Colors.red,
           ),
         );

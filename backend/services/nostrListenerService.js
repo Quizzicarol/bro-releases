@@ -88,14 +88,13 @@ class NostrListenerService extends EventEmitter {
         console.log(`✅ [NostrListener] Connected to ${relayUrl}`);
         this._connections.set(relayUrl, ws);
         
-        // Subscribe to dispute events
+        // Subscribe to dispute events — send ALL filters in a single REQ
+        // (multiple REQs with same subId would replace each other per NIP-01)
         const subId = `bro-agent-${Date.now().toString(36)}`;
         this._subscriptions.set(relayUrl, subId);
         
-        for (const filter of DISPUTE_FILTERS) {
-          const req = JSON.stringify(['REQ', subId, filter]);
-          ws.send(req);
-        }
+        const req = JSON.stringify(['REQ', subId, ...DISPUTE_FILTERS]);
+        ws.send(req);
       });
 
       ws.on('message', (data) => {

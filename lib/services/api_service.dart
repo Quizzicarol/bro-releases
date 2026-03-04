@@ -712,10 +712,10 @@ class ApiService {
     }
   }
 
-  /// GET /agent/:disputeId - Detalhes da análise de uma disputa
-  Future<Map<String, dynamic>?> getAgentAnalysis(String disputeId) async {
+  /// GET /agent/analysis/:orderId - Detalhes da análise de uma disputa
+  Future<Map<String, dynamic>?> getAgentAnalysis(String orderId) async {
     try {
-      final response = await _dio.get('/agent/$disputeId');
+      final response = await _dio.get('/agent/analysis/$orderId');
       return response.data as Map<String, dynamic>?;
     } catch (e) {
       debugPrint('❌ Erro ao buscar análise do agente: $e');
@@ -723,10 +723,12 @@ class ApiService {
     }
   }
 
-  /// POST /agent/:disputeId/approve - Aprovar sugestão do agente
-  Future<bool> approveAgentAnalysis(String disputeId) async {
+  /// POST /agent/approve - Aprovar sugestão do agente
+  Future<bool> approveAgentAnalysis(String orderId) async {
     try {
-      final response = await _dio.post('/agent/$disputeId/approve');
+      final response = await _dio.post('/agent/approve', data: {
+        'orderId': orderId,
+      });
       return response.data?['success'] == true;
     } catch (e) {
       debugPrint('❌ Erro ao aprovar análise: $e');
@@ -734,11 +736,12 @@ class ApiService {
     }
   }
 
-  /// POST /agent/:disputeId/reject - Rejeitar sugestão do agente
-  Future<bool> rejectAgentAnalysis(String disputeId, {String? reason}) async {
+  /// POST /agent/reject - Rejeitar sugestão do agente
+  Future<bool> rejectAgentAnalysis(String orderId, {required String humanDecision}) async {
     try {
-      final response = await _dio.post('/agent/$disputeId/reject', data: {
-        if (reason != null) 'reason': reason,
+      final response = await _dio.post('/agent/reject', data: {
+        'orderId': orderId,
+        'humanDecision': humanDecision,
       });
       return response.data?['success'] == true;
     } catch (e) {
@@ -747,10 +750,10 @@ class ApiService {
     }
   }
 
-  /// GET /agent/stats - Estatísticas do agente IA
+  /// GET /agent/status - Estatísticas do agente IA
   Future<Map<String, dynamic>?> getAgentStats() async {
     try {
-      final response = await _dio.get('/agent/stats');
+      final response = await _dio.get('/agent/status');
       return response.data as Map<String, dynamic>?;
     } catch (e) {
       debugPrint('❌ Erro ao buscar stats do agente: $e');
