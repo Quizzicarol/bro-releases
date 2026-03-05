@@ -12,6 +12,8 @@ import '../services/storage_service.dart';
 import '../services/nostr_service.dart';
 import '../services/lnaddress_service.dart';
 import '../services/local_collateral_service.dart';
+import '../services/platform_fee_service.dart';
+import '../config.dart';
 
 /// Tela de Carteira Lightning - Apenas BOLT11 (invoice)
 /// Funções: Ver saldo, Enviar pagamento, Receber (gerar invoice)
@@ -67,11 +69,17 @@ class _WalletScreenState extends State<WalletScreen> {
                            p['type'] == 'Receive';
         
         // OCULTAR: Taxas de plataforma (são internas, não devem aparecer para o usuário)
-        // Detectar por descrição OU por valor pequeno enviado
+        // 1. Filtrar por payment hash (mais confiável)
+        final paymentHash = p['paymentHash']?.toString() ?? '';
+        if (paymentHash.isNotEmpty && PlatformFeeService.feePaymentHashes.contains(paymentHash)) {
+          debugPrint('🔇 Ocultando taxa da plataforma (hash): $paymentHash ($amount sats)');
+          return false;
+        }
+        // 2. Fallback: filtrar por descrição
         final descLower = description.toLowerCase();
         if (descLower.contains('platform fee') || 
             descLower.contains('bro platform fee')) {
-          debugPrint('🔇 Ocultando taxa da plataforma: $description ($amount sats)');
+          debugPrint('🔇 Ocultando taxa da plataforma (desc): $description ($amount sats)');
           return false;
         }
         
@@ -86,6 +94,13 @@ class _WalletScreenState extends State<WalletScreen> {
         // Transações de 1-10 sats que são envio provavelmente são taxas de plataforma (~2%)
         if (!isReceived && amount > 0 && amount <= 10) {
           debugPrint('🔇 Ocultando pagamento pequeno (provável taxa): $amount sats');
+          return false;
+        }
+        
+        // OCULTAR: Pagamentos enviados sem descrição (taxas de plataforma via LNURL)
+        // Pagamentos legítimos do usuário sempre têm descrição (Bro - Ordem X, Garantia, etc)
+        if (!isReceived && (description.isEmpty || description == 'null')) {
+          debugPrint('🔇 Ocultando pagamento sem descrição (provável taxa interna): $amount sats');
           return false;
         }
         
@@ -2318,6 +2333,15 @@ class _WalletScreenState extends State<WalletScreen> {
     final showBroStyle = isBroEarning || isBroOrderPayment;
     final showMarketplaceStyle = isMarketplace;
 
+    // Integrar taxa da plataforma ao valor exibido (spread) para não aparecer separada
+    // Quando é um pagamento enviado correlacionado com uma ordem, o total inclui a taxa
+    int displayAmount = (amount is int) ? amount : (amount as num).toInt();
+    if (!isReceived && correlatedOrderId != null && PlatformFeeService.isFeePaid(correlatedOrderId!)) {
+      final feeRaw = (displayAmount * AppConfig.platformFeePercent).round();
+      final fee = feeRaw < 1 ? 1 : feeRaw;
+      displayAmount = displayAmount + fee;
+    }
+
     return GestureDetector(
       onTap: () => _showTransactionDetails(payment),
       child: Container(
@@ -2379,7 +2403,7 @@ class _WalletScreenState extends State<WalletScreen> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  '${isReceived ? '+' : '-'}$amount sats',
+                  '${isReceived ? '+' : '-'}$displayAmount sats',
                   style: TextStyle(
                     color: isReceived ? Colors.green : Colors.red,
                     fontWeight: FontWeight.bold,
@@ -2484,6 +2508,13 @@ class _WalletScreenState extends State<WalletScreen> {
       typeIcon = Icons.arrow_upward;
     }
     
+    // Integrar taxa no valor exibido (mesmo spread do histórico)
+    int detailAmount = (amount is int) ? amount : (amount as num).toInt();
+    if (!isReceived && correlatedOrderId != null && PlatformFeeService.isFeePaid(correlatedOrderId!)) {
+      final feeRaw = (detailAmount * AppConfig.platformFeePercent).round();
+      detailAmount = detailAmount + (feeRaw < 1 ? 1 : feeRaw);
+    }
+    
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -2525,7 +2556,7 @@ class _WalletScreenState extends State<WalletScreen> {
                             ),
                           ),
                           Text(
-                            '${isReceived ? '+' : '-'}$amount sats',
+                            '${isReceived ? '+' : '-'}$detailAmount sats',
                             style: TextStyle(
                               color: typeColor,
                               fontSize: 22,

@@ -20,6 +20,7 @@ class PlatformFeeService {
   static const String _totalCollectedKey = 'platform_total_collected';
   static const String _autoCollectionKey = 'platform_auto_collection_enabled';
   static const String _paidOrderIdsKey = 'platform_fee_paid_order_ids';
+  static const String _feePaymentHashesKey = 'platform_fee_payment_hashes';
   
   /// Taxa da plataforma (2%)
   /// Atualmente apenas registrada, não cobrada
@@ -31,7 +32,10 @@ class PlatformFeeService {
     final paidIds = prefs.getStringList(_paidOrderIdsKey) ?? [];
     _paidOrderIds.clear();
     _paidOrderIds.addAll(paidIds);
-    debugPrint('💼 PlatformFeeService inicializado com ${_paidOrderIds.length} ordens já pagas');
+    final hashes = prefs.getStringList(_feePaymentHashesKey) ?? [];
+    _feePaymentHashes.clear();
+    _feePaymentHashes.addAll(hashes);
+    debugPrint('💼 PlatformFeeService inicializado com ${_paidOrderIds.length} ordens já pagas, ${_feePaymentHashes.length} hashes');
   }
   
   /// Salva o registro de ordens pagas no storage
@@ -214,6 +218,7 @@ class PlatformFeeService {
   
   // IMPORTANTE: Registro de ordens que já tiveram a taxa paga para evitar duplicação
   static final Set<String> _paidOrderIds = {};
+  static final Set<String> _feePaymentHashes = {};
 
   /// Configura o callback de pagamento (chamar na inicialização do app)
   static void setPaymentCallback(
@@ -228,6 +233,16 @@ class PlatformFeeService {
   /// Verifica se a taxa já foi paga para uma ordem específica
   static bool isFeePaid(String orderId) {
     return _paidOrderIds.contains(orderId);
+  }
+
+  /// Retorna os payment hashes de taxas da plataforma (para filtrar no histórico)
+  static Set<String> get feePaymentHashes => Set.unmodifiable(_feePaymentHashes);
+
+  /// Salva um payment hash de taxa no storage
+  static Future<void> _saveFeePaymentHash(String hash) async {
+    _feePaymentHashes.add(hash);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_feePaymentHashesKey, _feePaymentHashes.toList());
   }
   
   /// Limpa o registro de ordens pagas (usar apenas em casos especiais)
@@ -329,6 +344,12 @@ class PlatformFeeService {
           // Lock já foi adquirido - apenas persistir no storage
           await _savePaidOrderIds();
           
+          // Salvar payment hash para filtrar do histórico da carteira
+          final payHash = payResult['payment']?['paymentHash'] as String?;
+          if (payHash != null && payHash.isNotEmpty) {
+            await _saveFeePaymentHash(payHash);
+          }
+          
           debugPrint('');
           debugPrint('✅ ════════════════════════════════════════════════');
           debugPrint('✅ TAXA DA PLATAFORMA PAGA COM SUCESSO!');
@@ -363,6 +384,12 @@ class PlatformFeeService {
         if (payResult != null && payResult['success'] == true) {
           // Lock já foi adquirido - apenas persistir no storage
           await _savePaidOrderIds();
+          
+          // Salvar payment hash para filtrar do histórico
+          final payHash = payResult['payment']?['paymentHash'] as String?;
+          if (payHash != null && payHash.isNotEmpty) {
+            await _saveFeePaymentHash(payHash);
+          }
           
           debugPrint('✅ TAXA DA PLATAFORMA PAGA COM SUCESSO via $_currentBackend!');
           await markAsCollected([orderId]);
