@@ -6,7 +6,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'storage_service.dart';
 
 /// Gerenciador de Relays Nostr
-class RelayService {
+class RelayService extends ChangeNotifier {
   static final RelayService _instance = RelayService._internal();
   factory RelayService() => _instance;
   RelayService._internal();
@@ -36,6 +36,9 @@ class RelayService {
   List<String> get activeRelays => _activeRelays;
   Map<String, bool> get relayStatus => Map.unmodifiable(_relayStatus);
 
+  /// Número de relays atualmente conectados
+  int get connectedCount => _relayStatus.values.where((s) => s).length;
+
   /// Inicializar relays salvos ou padrão
   Future<void> initialize() async {
     final saved = await _storage.getRelays();
@@ -59,6 +62,7 @@ class RelayService {
       
       _connections[url] = channel;
       _relayStatus[url] = true;
+      notifyListeners();
 
       // Escutar mensagens
       channel.stream.listen(
@@ -68,11 +72,13 @@ class RelayService {
         onError: (error) {
           broLog('❌ Erro no relay $url: $error');
           _relayStatus[url] = false;
+          notifyListeners();
         },
         onDone: () {
           broLog('🔌 Desconectado do relay: $url');
           _relayStatus[url] = false;
           _connections.remove(url);
+          notifyListeners();
         },
       );
 
@@ -81,6 +87,7 @@ class RelayService {
     } catch (e) {
       broLog('❌ Falha ao conectar ao relay $url: $e');
       _relayStatus[url] = false;
+      notifyListeners();
       return false;
     }
   }

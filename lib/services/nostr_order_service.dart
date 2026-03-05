@@ -1178,6 +1178,13 @@ class NostrOrderService {
     String? e2eId, // v236: E2E ID do PIX para validação cruzada
   }) async {
     try {
+      // v337: Validar tamanho da imagem (máximo 500KB em base64)
+      final imageSizeBytes = proofImageBase64.length * 3 ~/ 4; // base64 → bytes approx
+      if (imageSizeBytes > 500 * 1024) {
+        broLog('❌ Comprovante muito grande: ${(imageSizeBytes / 1024).toStringAsFixed(0)}KB (máx 500KB)');
+        return false;
+      }
+
       final keychain = Keychain(providerPrivateKey);
       
       // NOTA: O comprovante é criptografado via NIP-44 entre provedor e usuário

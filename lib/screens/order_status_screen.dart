@@ -2543,9 +2543,9 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                             final picker = ImagePicker();
                             final picked = await picker.pickImage(
                               source: ImageSource.gallery,
-                              maxWidth: 1024,
-                              maxHeight: 1024,
-                              imageQuality: 70,
+                              maxWidth: 600,
+                              maxHeight: 600,
+                              imageQuality: 50,
                             );
                             if (picked != null) {
                               final file = File(picked.path);
@@ -2571,9 +2571,9 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                             final picker = ImagePicker();
                             final picked = await picker.pickImage(
                               source: ImageSource.camera,
-                              maxWidth: 1024,
-                              maxHeight: 1024,
-                              imageQuality: 70,
+                              maxWidth: 600,
+                              maxHeight: 600,
+                              imageQuality: 50,
                             );
                             if (picked != null) {
                               final file = File(picked.path);
@@ -2944,22 +2944,45 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
   Future<void> _createLightningInvoiceAndShow() async {
     broLog('🔵 _createLightningInvoiceAndShow chamado');
     
-    // Mostrar loading
+    // Mostrar loading com feedback progressivo
+    final stopwatch = Stopwatch()..start();
+    final statusNotifier = ValueNotifier<String>('Conectando ao Spark...');
+    Timer? feedbackTimer;
+    
+    feedbackTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      final elapsed = stopwatch.elapsed.inSeconds;
+      if (elapsed >= 30) {
+        statusNotifier.value = 'Tentando via Liquid... (${elapsed}s)';
+      } else if (elapsed >= 15) {
+        statusNotifier.value = 'Aguardando resposta... (${elapsed}s)';
+      } else {
+        statusNotifier.value = 'Conectando ao Spark... (${elapsed}s)';
+      }
+    });
+    
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const AlertDialog(
-        backgroundColor: Color(0xFF1E1E1E),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(color: Color(0xFFFF6B6B)),
-            SizedBox(height: 16),
-            Text(
-              'Gerando Invoice Lightning...',
-              style: TextStyle(color: Colors.white),
-            ),
-          ],
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        content: ValueListenableBuilder<String>(
+          valueListenable: statusNotifier,
+          builder: (context, status, _) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(color: Color(0xFFFF6B6B)),
+              const SizedBox(height: 16),
+              Text(
+                'Gerando Invoice Lightning...',
+                style: const TextStyle(color: Colors.white),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                status,
+                style: const TextStyle(color: Color(0x99FFFFFF), fontSize: 12),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2983,7 +3006,9 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
         },
       );
 
-      // Fechar loading
+      // Fechar loading e limpar timer
+      feedbackTimer?.cancel();
+      stopwatch.stop();
       if (mounted) Navigator.pop(context);
 
       broLog('🔵 Invoice data recebido: $invoiceData');
@@ -3008,7 +3033,9 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
         _showError('Erro ao criar invoice: ${invoiceData?['error'] ?? 'Desconhecido'}');
       }
     } catch (e) {
-      // Fechar loading
+      // Fechar loading e limpar timer
+      feedbackTimer?.cancel();
+      stopwatch.stop();
       if (mounted) Navigator.pop(context);
       broLog('❌ Erro ao criar invoice: $e');
       _showError('Erro ao criar invoice: $e');

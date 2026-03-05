@@ -132,7 +132,7 @@ class _OrderDetailsModalState extends State<OrderDetailsModal> {
     if (result == null) return;
 
     final source = result == 'camera' ? ImageSource.camera : ImageSource.gallery;
-    final image = await picker.pickImage(source: source, imageQuality: 70);
+    final image = await picker.pickImage(source: source, maxWidth: 600, maxHeight: 600, imageQuality: 50);
 
     if (image == null) return;
 
