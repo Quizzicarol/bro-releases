@@ -19,6 +19,8 @@ import 'new_trade_screen.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
 import 'nostr_conversations_screen.dart';
+import 'order_status_screen.dart';
+import '../models/order.dart';
 import '../services/relay_service.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -530,9 +532,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildContent(BreezProvider breezProvider, OrderProvider orderProvider) {
+    final pendingDisputePayments = orderProvider.disputePaymentPendingOrders;
+    
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // v338: Banner de pagamento pendente pós-disputa
+        if (pendingDisputePayments.isNotEmpty)
+          _buildDisputePaymentBanner(pendingDisputePayments),
+        
         // Grade de Botões de Ação (3 botões)
         _buildActionButtonsGrid(),
         const SizedBox(height: 14),
@@ -551,6 +559,59 @@ class _HomeScreenState extends State<HomeScreen> {
         // Extra space
         const SizedBox(height: 80),
       ],
+    );
+  }
+
+  /// v338: Banner alertando sobre pagamento pendente após resolução de disputa
+  Widget _buildDisputePaymentBanner(List<Order> pendingOrders) {
+    return GestureDetector(
+      onTap: () {
+        // Navegar para a primeira ordem com pagamento pendente
+        final order = pendingOrders.first;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => OrderStatusScreen(
+              orderId: order.id,
+              userId: order.userPubkey,
+              amountBrl: order.amount,
+              amountSats: order.btcAmount.round(),
+            ),
+          ),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.red.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.red.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '⚖️ Pagamento pendente (${pendingOrders.length})',
+                    style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Disputa resolvida — toque para enviar pagamento ao provedor',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.red),
+          ],
+        ),
+      ),
     );
   }
 

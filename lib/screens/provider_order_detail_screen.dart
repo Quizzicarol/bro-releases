@@ -50,6 +50,9 @@ class _ProviderOrderDetailScreenState extends State<ProviderOrderDetailScreen> {
   // Dados de resolução de disputa (vindo do mediador)
   Map<String, dynamic>? _disputeResolution;
   
+  // v338: Regeneração de invoice pós-disputa
+  bool _isRegeneratingInvoice = false;
+  
   // v237: Mensagens do mediador para o provedor
   List<Map<String, dynamic>> _providerMediatorMessages = [];
   bool _loadingProviderMediatorMessages = false;
@@ -809,6 +812,11 @@ class _ProviderOrderDetailScreenState extends State<ProviderOrderDetailScreen> {
             if (_disputeResolution != null) ...[
               const SizedBox(height: 16),
               _buildDisputeResolutionCard(),
+              // v338: Botão para regenerar invoice se disputa foi a favor do provedor
+              if (_disputeResolution!['resolution'] == 'resolved_provider') ...[
+                const SizedBox(height: 10),
+                _buildRegenerateInvoiceButton(),
+              ],
             ],
           ]
           // ========== AGUARDANDO CONFIRMAÇÃO DO USUÁRIO ==========
@@ -853,6 +861,11 @@ class _ProviderOrderDetailScreenState extends State<ProviderOrderDetailScreen> {
             if (_disputeResolution != null) ...[
               const SizedBox(height: 16),
               _buildDisputeResolutionCard(),
+              // v338: Botão para regenerar invoice se disputa foi a favor do provedor
+              if (_disputeResolution!['resolution'] == 'resolved_provider') ...[
+                const SizedBox(height: 10),
+                _buildRegenerateInvoiceButton(),
+              ],
             ],
             // v236: Botão enviar evidência quando em disputa
             if (status == 'disputed' && _disputeResolution == null) ...[
@@ -1514,6 +1527,115 @@ class _ProviderOrderDetailScreenState extends State<ProviderOrderDetailScreen> {
         ],
       ),
     );
+  }
+
+  /// v338: Botão para o provedor regenerar invoice quando o original expirou
+  Widget _buildRegenerateInvoiceButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _isRegeneratingInvoice ? null : _handleRegenerateInvoice,
+        icon: _isRegeneratingInvoice
+            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            : const Icon(Icons.refresh),
+        label: Text(_isRegeneratingInvoice ? 'Gerando novo invoice...' : '🔄 Gerar Novo Invoice (se expirou)'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _isRegeneratingInvoice ? Colors.grey : Colors.green,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+        ),
+      ),
+    );
+  }
+
+  /// v338: Gera novo invoice Lightning e publica no Nostr para substituir o expirado
+  Future<void> _handleRegenerateInvoice() async {
+    if (_isRegeneratingInvoice) return;
+    setState(() => _isRegeneratingInvoice = true);
+
+    try {
+      final breezProvider = context.read<BreezProvider>();
+      final liquidProvider = context.read<BreezLiquidProvider>();
+      final orderProvider = context.read<OrderProvider>();
+
+      // Calcular valor em sats
+      final order = orderProvider.getOrderById(widget.orderId);
+      final totalSats = order?.btcAmount.round() ?? 0;
+
+      if (totalSats <= 0) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('❌ Valor da ordem inválido'), backgroundColor: Colors.red),
+          );
+        }
+        setState(() => _isRegeneratingInvoice = false);
+        return;
+      }
+
+      String? newInvoice;
+
+      if (breezProvider.isInitialized) {
+        broLog('⚡ [RegenInvoice] Gerando invoice de $totalSats sats via Spark...');
+        final result = await breezProvider.createInvoice(
+          amountSats: totalSats,
+          description: 'Bro - Ordem ${widget.orderId.substring(0, 8)} (novo)',
+        ).timeout(const Duration(seconds: 30));
+        if (result != null && result['bolt11'] != null) {
+          newInvoice = result['bolt11'] as String;
+        }
+      } else if (liquidProvider.isInitialized) {
+        broLog('⚡ [RegenInvoice] Gerando invoice de $totalSats sats via Liquid...');
+        final result = await liquidProvider.createInvoice(
+          amountSats: totalSats,
+          description: 'Bro - Ordem ${widget.orderId.substring(0, 8)} (novo)',
+        ).timeout(const Duration(seconds: 30));
+        if (result != null && result['bolt11'] != null) {
+          newInvoice = result['bolt11'] as String;
+        }
+      }
+
+      if (newInvoice == null || newInvoice.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('❌ Carteira não conectada. Abra a carteira e tente novamente.'), backgroundColor: Colors.red),
+          );
+        }
+        setState(() => _isRegeneratingInvoice = false);
+        return;
+      }
+
+      broLog('✅ [RegenInvoice] Novo invoice gerado: ${newInvoice.substring(0, 30)}...');
+
+      // Publicar novo evento COMPLETE no Nostr com o invoice atualizado
+      final success = await orderProvider.completeOrderAsProvider(
+        widget.orderId,
+        'invoice_regenerated', // proof placeholder — não é um novo comprovante
+        providerInvoice: newInvoice,
+      );
+
+      if (success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Novo invoice publicado! O usuário pagará automaticamente.'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 5),
+          ),
+        );
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('⚠️ Invoice gerado mas falha ao publicar no Nostr. Tente novamente.'), backgroundColor: Colors.orange),
+        );
+      }
+    } catch (e) {
+      broLog('❌ [RegenInvoice] Erro: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+
+    if (mounted) setState(() => _isRegeneratingInvoice = false);
   }
 
   Map<String, dynamic> _getStatusInfo(String status) {

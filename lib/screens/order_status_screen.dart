@@ -176,6 +176,16 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
           _disputePaymentPending = paymentNeeded;
         });
         broLog('✅ Resolução de disputa encontrada para ${widget.orderId.substring(0, 8)}');
+        
+        // v338: AUTO-PAY — pagar provedor automaticamente sem interação do usuário
+        if (paymentNeeded && mounted) {
+          broLog('🤖 [AutoPay] Iniciando pagamento automático ao provedor...');
+          // Delay breve para garantir que UI renderizou
+          await Future.delayed(const Duration(seconds: 1));
+          if (mounted) {
+            _handleDisputePayment(autoMode: true);
+          }
+        }
       }
     } catch (e) {
       broLog('⚠️ Erro ao buscar resolução: $e');
@@ -4136,35 +4146,39 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
   }
 
   /// v337: Paga o provedor após resolução de disputa a favor dele
-  /// Reutiliza a mesma lógica de pagamento de _handleConfirmPayment
-  Future<void> _handleDisputePayment() async {
+  /// v338: autoMode=true pula diálogo de confirmação (auto-pay após resolução)
+  Future<void> _handleDisputePayment({bool autoMode = false}) async {
     if (_isPayingDisputeResolution) return;
 
-    // Confirmar com o usuário antes de pagar
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('⚖️ Pagamento por Mediação'),
-        content: Text(
-          'O mediador decidiu a favor do provedor.\n\n'
-          'Valor: ${widget.amountSats} sats\n\n'
-          'Ao confirmar, o pagamento será enviado ao provedor via Lightning.',
+    // Confirmar com o usuário antes de pagar (skip em autoMode)
+    if (!autoMode) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('⚖️ Pagamento por Mediação'),
+          content: Text(
+            'O mediador decidiu a favor do provedor.\n\n'
+            'Valor: ${widget.amountSats} sats\n\n'
+            'Ao confirmar, o pagamento será enviado ao provedor via Lightning.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B6B)),
+              child: const Text('Confirmar Pagamento'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6B6B)),
-            child: const Text('Confirmar Pagamento'),
-          ),
-        ],
-      ),
-    );
+      );
 
-    if (confirm != true || !mounted) return;
+      if (confirm != true || !mounted) return;
+    } else {
+      broLog('🤖 [AutoPay] Modo automático — pulando confirmação do usuário');
+    }
 
     setState(() => _isPayingDisputeResolution = true);
 

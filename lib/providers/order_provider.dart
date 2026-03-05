@@ -86,6 +86,13 @@ class OrderProvider with ChangeNotifier {
   List<Order> get pendingOrders => _filteredOrders.where((o) => o.status == 'pending' || o.status == 'payment_received').toList();
   List<Order> get activeOrders => _filteredOrders.where((o) => ['payment_received', 'confirmed', 'accepted', 'processing'].contains(o.status)).toList();
   List<Order> get completedOrders => _filteredOrders.where((o) => o.status == 'completed').toList();
+  
+  /// v338: Ordens com pagamento pendente pós-resolução de disputa
+  List<Order> get disputePaymentPendingOrders => _filteredOrders.where((o) =>
+    o.metadata?['disputePaymentPending'] == true &&
+    o.metadata?['disputeProviderPaid'] != true
+  ).toList();
+  
   bool get isProviderMode => _isProviderMode;
   Order? get currentOrder => _currentOrder;
   bool get isLoading => _isLoading;
@@ -2811,6 +2818,8 @@ class OrderProvider with ChangeNotifier {
                 ...?existing.metadata,
                 'wasDisputed': true,
                 'disputeResolvedAt': DateTime.now().toIso8601String(),
+                // v338: Marcar pagamento pendente se resolução foi a favor do provedor
+                if (statusToUse == 'completed') 'disputePaymentPending': true,
               };
               broLog('⚖️ syncOrdersFromNostr: ordem ${existing.id.substring(0, 8)} resolvida de disputa → $statusToUse');
             } else if (update['proofImage'] != null || update['providerInvoice'] != null) {
