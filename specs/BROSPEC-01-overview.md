@@ -76,8 +76,10 @@ O Protocolo Bro utiliza os seguintes kinds reservados:
 | `30078` | Ordem de Pagamento | BROSPEC-02 |
 | `30079` | Aceitação de Ordem | BROSPEC-02 |
 | `30080` | Atualização de Status | BROSPEC-02 |
-| `30081` | Conclusão com Comprovante | BROSPEC-02 |
-| `30082` | Perfil de Provedor | BROSPEC-05 |
+| `30081` | Conclusão com Comprovante (criptografado NIP-44) | BROSPEC-02 |
+| `30082` | Perfil de Provedor | BROSPEC-06 |
+| `30085` | Avaliação Marketplace | BROSPEC-05 |
+| `30019` | Oferta Marketplace (NIP-15 Classifieds) | BROSPEC-02 |
 | `4` | DM Criptografada (NIP-04) | Chat privado |
 
 ## Princípios de Design
@@ -141,10 +143,14 @@ O Protocolo Bro utiliza os seguintes kinds reservados:
 O Protocolo Bro depende das seguintes NIPs do Nostr:
 
 - **NIP-01**: Protocolo básico e evento
-- **NIP-04**: Mensagens diretas criptografadas
+- **NIP-04**: Mensagens diretas criptografadas (chat entre usuários)
+- **NIP-09**: Deleção de eventos (kind 5)
 - **NIP-10**: Marcação de eventos (reply/root)
+- **NIP-15**: Marketplace / Classifieds (kind 30019 — ofertas)
 - **NIP-19**: Entidades codificadas (npub, nsec)
 - **NIP-33**: Eventos Parametrized Replaceable (kinds 30xxx)
+- **NIP-44**: Criptografia versionada (XChaCha20-Poly1305) — usada para comprovantes
+- **NIP-98**: Autorização HTTP
 
 ## Compatibilidade
 
@@ -154,5 +160,5 @@ O Protocolo Bro depende das seguintes NIPs do Nostr:
 
 ---
 
-*Versão: 0.1-draft*
-*Data: Janeiro 2026*
+*Versão: 0.2-draft*
+*Data: Julho 2026*

@@ -58,53 +58,63 @@ Esta especificação define o fluxo completo de uma ordem no Protocolo Bro, desd
 
 ```
                     ┌─────────────┐
-                    │   pending   │ ◄── Ordem criada
+                    │   draft    │ ◄── Rascunho (não publicado)
+                    └──────┬──────┘
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │   pending   │ ◄── Publicada nos relays
                     └──────┬──────┘
                            │
               ┌────────────┼────────────┐
-              │            │            │
-              ▼            ▼            ▼
-       ┌──────────┐  ┌──────────┐  ┌─────────┐
-       │ accepted │  │ expired  │  │cancelled│
-       └────┬─────┘  └──────────┘  └─────────┘
+              │                         │
+              ▼                         ▼
+    ┌─────────────────┐     ┌─────────┐
+    │payment_received│     │cancelled│
+    └────────┬────────┘     └─────────┘
             │
             ▼
-       ┌─────────┐
-       │  paid   │ ◄── Invoice Lightning paga
-       └────┬────┘
+       ┌──────────┐
+       │ accepted │ ◄── Provedor aceitou
+       └────┬─────┘
             │
             ▼
-    ┌───────────────┐
-    │  in_progress  │ ◄── Provedor executando pagamento
-    └───────┬───────┘
+       ┌────────────┐
+       │ processing │ ◄── Provedor executando pagamento
+       └──────┬─────┘
             │
             ▼
 ┌────────────────────────┐
 │  awaiting_confirmation │ ◄── Comprovante enviado
 └───────────┬────────────┘
             │
-     ┌──────┴──────┐
-     │             │
-     ▼             ▼
-┌──────────┐  ┌──────────┐
-│completed │  │ disputed │
-└──────────┘  └──────────┘
+     ┌──────┴──────┬────────────┐
+     │             │             │
+     ▼             ▼             ▼
+┌──────────┐  ┌──────────┐  ┌────────────┐
+│completed │  │ disputed │  │ liquidated │
+└──────────┘  └──────────┘  └────────────┘
 ```
 
 ## Transições de Estado
 
 | De | Para | Gatilho | Quem |
 |----|------|---------|------|
-| - | `pending` | Criar ordem | Usuário |
-| `pending` | `accepted` | Provedor aceita | Provedor |
-| `pending` | `expired` | Timeout (30min) | Sistema |
+| - | `draft` | Rascunho criado | Usuário |
+| `draft` | `pending` | Publicação nos relays | Usuário |
+| `pending` | `payment_received` | Invoice Lightning paga | Lightning |
 | `pending` | `cancelled` | Cancelamento | Usuário |
-| `accepted` | `paid` | Invoice paga | Lightning |
-| `paid` | `in_progress` | Provedor inicia | Provedor |
-| `in_progress` | `awaiting_confirmation` | Comprovante enviado | Provedor |
+| `payment_received` | `accepted` | Provedor aceita | Provedor |
+| `accepted` | `processing` | Provedor inicia pagamento | Provedor |
+| `processing` | `awaiting_confirmation` | Comprovante enviado | Provedor |
 | `awaiting_confirmation` | `completed` | Usuário confirma | Usuário |
+| `awaiting_confirmation` | `liquidated` | Auto-liquidação após 36h | Sistema |
 | `awaiting_confirmation` | `disputed` | Abre disputa | Ambos |
 | `disputed` | `completed` | Resolução | Mediador |
+| `disputed` | `cancelled` | Resolução | Mediador |
+| qualquer | `disputed` | Disputa aberta (sobrescreve status não-terminal) | Ambos |
+
+> **Status terminais**: `completed`, `liquidated` e `cancelled` (absoluto — apenas `disputed` pode sobrescrever `cancelled`).
 
 ## Detalhamento das Etapas
 
@@ -124,8 +134,8 @@ O usuário cria uma ordem especificando:
 {
   btcPrice: 800000.00,  // Cotação atual
   btcAmount: 0.000125,  // amount / btcPrice
-  providerFee: 3.00,    // % do provedor
-  platformFee: 0.50,    // % da plataforma (opcional)
+  providerFee: 3.00,    // 3% do provedor (fixo)
+  platformFee: 2.00,     // 2% da plataforma (fixo)
   total: 103.50,        // BRL total
 }
 ```
@@ -158,8 +168,9 @@ Provedor vê ordens pendentes e escolhe aceitar.
 Após aceite, usuário paga invoice.
 
 **Opções de Invoice:**
-- **Hold Invoice**: Fundos travados até confirmação
-- **Invoice Normal**: Pagamento direto ao provedor
+- **Invoice Normal**: Pagamento direto ao provedor (implementação atual)
+
+> **Nota**: Hold Invoices são descritas em BROSPEC-04 como funcionalidade planejada (não implementada).
 
 **Ações:**
 1. Provedor gera invoice (valor em sats)
@@ -213,16 +224,22 @@ Usuário verifica e confirma.
 3. Marcar ordem como `completed`
 4. Deixar avaliação (opcional)
 
-## Timeouts
+## Timeouts e Auto-Liquidação
 
 | Estado | Timeout | Ação |
 |--------|---------|------|
-| `pending` | 30 min | Expira automaticamente |
-| `accepted` | 15 min | Pode cancelar |
-| `paid` | 60 min | Pode abrir disputa |
-| `awaiting_confirmation` | 24h | Auto-confirmação* |
+| `pending` | 24h | Ordem pode ser cancelada |
+| `awaiting_confirmation` | 36h | **Auto-liquidação** |
 
-> *Auto-confirmação: Se usuário não responder em 24h e não abrir disputa, ordem é marcada como `completed`.
+### Auto-Liquidação
+
+Se o usuário não confirmar o recebimento e não abrir disputa dentro de **36 horas** após o comprovante ser enviado, a ordem é automaticamente marcada como `liquidated` (concluída com sucesso).
+
+- Executada em background via WorkManager
+- Lock de 2 minutos TTL para evitar race conditions
+- Apenas ordens em `awaiting_confirmation` são elegíveis
+
+> **Nota**: Não existe status `expired`. Ordens não aceitas permanecem `pending` até cancelamento manual.
 
 ## Casos Especiais
 

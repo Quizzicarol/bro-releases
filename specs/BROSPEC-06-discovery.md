@@ -20,18 +20,19 @@ Filtrar eventos `kind 30082` (perfil de provedor):
 }
 ```
 
-### 2. Relay Dedicado (Opcional)
+### 2. Relays Utilizados
 
-Relay especializado para o ecossistema Bro:
+O app utiliza relays públicos Nostr:
 
 ```
-wss://relay.brostr.app
+wss://relay.damus.io
+wss://nos.lol
+wss://relay.primal.net
+wss://relay.nostr.band
+wss://nostr.mom
 ```
 
-**Vantagens:**
-- Filtros otimizados
-- Menor latência
-- Métricas específicas
+> **Nota**: Não existe relay dedicado Bro. Qualquer relay NIP-01 compatível funciona.
 
 ### 3. Hashtags de Descoberta
 
@@ -43,13 +44,14 @@ wss://relay.brostr.app
 | `#bro-latam` | Provedores LATAM |
 | `#bro-global` | Provedores globais |
 
-### 4. NIP-05 Directory
+### 4. NIP-05 Directory (PLANEJADO)
+
+> **⚠️ NÃO IMPLEMENTADO** — design futuro.
 
 Provedores verificados em domínios conhecidos:
 
 ```
-provider@brostr.app
-provider@bro.exchange
+provider@bro.example.com
 ```
 
 ## Perfil de Provedor
@@ -69,7 +71,7 @@ provider@bro.exchange
     // Identidade
     ["name", "ProviderX"],
     ["picture", "https://..."],
-    ["nip05", "providerx@brostr.app"],
+    ["nip05", "providerx@example.com"],
     
     // Capacidades
     ["methods", "pix,boleto,ted"],
@@ -86,8 +88,8 @@ provider@bro.exchange
     ["fee_type", "percentage"],
     
     // Garantia
-    ["collateral", "2000000"],
-    ["tier", "gold"],
+    ["collateral_brl", "200.00"],
+    ["tier", "basic"],
     
     // Disponibilidade
     ["available", "true"],
@@ -185,7 +187,7 @@ provider@bro.exchange
   },
   
   "verification": {
-    "nip05": "providerx@brostr.app",
+    "nip05": "providerx@example.com",
     "verified": true,
     "verifiedAt": "2025-06-15T00:00:00Z"
   }
@@ -227,7 +229,9 @@ const filtered = providers.filter(p =>
 );
 ```
 
-## Ordenação de Resultados
+## Ordenação de Resultados (PLANEJADO)
+
+> **⚠️ NÃO IMPLEMENTADO** — A implementação atual lista provedores sem ranking algorítmico. O design abaixo é futuro.
 
 ### Critérios Padrão
 

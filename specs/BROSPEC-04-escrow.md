@@ -17,7 +17,11 @@ O sistema de escrow mitiga esses riscos.
 
 ## Opções de Implementação
 
-### Opção 1: Hold Invoices (Recomendado)
+### Opção 1: Hold Invoices
+
+> **⚠️ STATUS: PLANEJADO — NÃO IMPLEMENTADO**
+>
+> Hold Invoices estão descritas aqui como design futuro. A implementação atual usa invoices normais com auto-liquidação após 36h.
 
 Lightning Hold Invoices permitem travar fundos até condição ser satisfeita.
 
@@ -56,42 +60,26 @@ Lightning Hold Invoices permitem travar fundos até condição ser satisfeita.
 - Requer LSP compatível
 - Timeout limitado (~24h)
 
-### Opção 2: Garantia do Provedor (Colateral)
+### Opção 2: Garantia do Provedor (Colateral) — **IMPLEMENTADO**
 
-Provedor deposita garantia que é perdida em caso de fraude.
+Provedor deposita garantia em BRL (convertida dinamicamente para sats com base no preço BTC atual).
 
-```
-┌──────────┐                              ┌──────────┐
-│ PROVEDOR │                              │ SISTEMA  │
-└────┬─────┘                              └────┬─────┘
-     │                                         │
-     │ 1. Deposita 500k sats como garantia     │
-     ├────────────────────────────────────────►│
-     │                                         │
-     │        (Garantia travada)               │
-     │                                         │
-     │ 2. Aceita ordem de 100k sats            │
-     ├────────────────────────────────────────►│
-     │                                         │
-     │        (100k sats da garantia travados  │
-     │         para esta ordem)                │
-     │                                         │
-     │ 3. Completa ordem com sucesso           │
-     ├────────────────────────────────────────►│
-     │                                         │
-     │ 4. Garantia destravada                  │
-     │◄────────────────────────────────────────┤
-     │                                         │
-```
+#### Tiers de Provedor (Implementação Atual)
 
-#### Tiers de Provedor
+| Tier | Display | Garantia (BRL) | Limite/Ordem (BRL) |
+|------|---------|----------------|--------------------|
+| trial | 🧪 Trial | R$ 10 | R$ 10 |
+| starter | 🥉 Iniciante | R$ 50 | R$ 50 |
+| basic | 🥈 Básico | R$ 200 | R$ 200 |
+| intermediate | 🥇 Intermediário | R$ 500 | R$ 500 |
+| advanced | 💎 Avançado | R$ 1.000 | R$ 1.000 |
+| master | 👑 Master | R$ 3.000 | Ilimitado |
 
-| Tier | Garantia | Limite/Ordem | Ordens Simultâneas |
-|------|----------|--------------|-------------------|
-| Bronze | 100k sats | R$ 500 | 2 |
-| Prata | 500k sats | R$ 2.000 | 5 |
-| Ouro | 2M sats | R$ 10.000 | 10 |
-| Diamante | 10M sats | R$ 50.000 | 20 |
+> **Limite Beta**: Durante a fase de testes, `maxTierLimitBrl = 200.0` — provedores só podem operar até o tier Básico.
+>
+> **Conversão dinâmica**: Os valores em sats são calculados em tempo real a partir do preço BTC/BRL. A garantia é definida e exibida em BRL.
+>
+> **Nota**: Ordens simultâneas e limites de concorrência não estão implementados.
 
 #### Evento de Tier (kind 30082)
 
@@ -102,16 +90,19 @@ Provedor deposita garantia que é perdida em caso de fraude.
   "tags": [
     ["d", "provider_tier"],
     ["t", "bro-provider"],
-    ["tier", "gold"],
-    ["collateral", "2000000"],
-    ["max_order", "10000.00"],
-    ["max_concurrent", "10"]
+    ["tier", "basic"],
+    ["collateral_brl", "200.00"],
+    ["max_order_brl", "200.00"]
   ],
   "content": "{...}"
 }
 ```
 
 ### Opção 3: Escrow Multisig
+
+> **⚠️ STATUS: PLANEJADO — NÃO IMPLEMENTADO**
+>
+> Multisig 2-de-3 está descrito como design futuro para valores altos.
 
 Para valores altos, usar escrow Bitcoin on-chain com multisig 2-de-3.
 
@@ -136,7 +127,9 @@ Cenários:
 - Taxas de mineração
 - Complexo de implementar
 
-## Fluxo com Hold Invoice
+## Fluxo com Hold Invoice (PLANEJADO)
+
+> **⚠️ Não implementado** — exemplos abaixo são design futuro.
 
 ### 1. Usuário Cria Ordem
 
@@ -201,10 +194,10 @@ await lsp.cancelHoldInvoice(orderId);
 ### 1. Provedor Deposita Garantia
 
 ```javascript
-// Gerar invoice de depósito
+// Gerar invoice de depósito (valor em BRL convertido para sats)
 const depositInvoice = await escrow.createDepositInvoice({
-  tierId: 'gold',
-  amountSats: 2000000
+  tierId: 'basic',   // R$ 200
+  amountBrl: 200.00   // Convertido para sats pelo preço BTC atual
 });
 
 // Provedor paga
@@ -212,8 +205,8 @@ await wallet.payInvoice(depositInvoice);
 
 // Publicar tier no Nostr
 await publishProviderTier({
-  tier: 'gold',
-  collateral: 2000000
+  tier: 'basic',
+  collateralBrl: 200.00
 });
 ```
 

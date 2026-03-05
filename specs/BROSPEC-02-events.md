@@ -167,7 +167,7 @@ Evento para atualizar status de uma ordem sem substituir o original.
 {
   "type": "bro_order_update",
   "orderId": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "in_progress",
+  "status": "processing",
   "providerId": "<pubkey>",
   "paymentProof": null,
   "updatedAt": "2026-01-20T10:32:00Z"
@@ -209,7 +209,7 @@ Evento publicado pelo provedor quando completa o pagamento.
   "orderId": "550e8400-e29b-41d4-a716-446655440000",
   "orderEventId": "<event_id_da_ordem>",
   "providerId": "<pubkey_do_provedor>",
-  "proofImage": "<base64_encoded_image>",
+  "proofImage_nip44": "<nip44v2_encrypted_base64_image>",
   "recipientPubkey": "<user_pubkey>",
   "completedAt": "2026-01-20T10:35:00Z"
 }
@@ -219,10 +219,10 @@ Evento publicado pelo provedor quando completa o pagamento.
 
 | Campo | Tipo | Obrigatório | Descrição |
 |-------|------|-------------|-----------|
-| `proofImage` | string | Sim | Comprovante em base64 |
+| `proofImage_nip44` | string | Sim | Comprovante base64 criptografado com NIP-44v2 |
 | `recipientPubkey` | string | Sim | Pubkey do destinatário |
 
-> **Nota de Privacidade**: O comprovante é enviado em plaintext. Para privacidade total, considere usar NIP-04/NIP-44 para criptografar ou enviar via DM separada.
+> **Privacidade**: O comprovante é **obrigatoriamente** criptografado com NIP-44v2 (XChaCha20-Poly1305). O campo `proofImage_nip44` contém a imagem base64 criptografada via `Nip44Service().encryptBetween()` para o destinatário (usuário) e separadamente para o mediador admin.
 
 ---
 
@@ -295,19 +295,73 @@ Evento que descreve um provedor e suas capacidades.
 
 ---
 
+### Kind 30085: Avaliação Marketplace (Bro Review)
+
+Evento para avaliações de provedores no marketplace.
+
+#### Estrutura
+
+```json
+{
+  "kind": 30085,
+  "pubkey": "<user_pubkey>",
+  "created_at": <unix_timestamp>,
+  "tags": [
+    ["d", "<order_id>_review"],
+    ["e", "<order_event_id>"],
+    ["p", "<provider_pubkey>"],
+    ["t", "bro-review"]
+  ],
+  "content": "<json>"
+}
+```
+
+#### Content
+
+```json
+{
+  "ratingAtendimento": 3,
+  "ratingProduto": 3,
+  "comment": "Pagamento rápido, recomendo!"
+}
+```
+
+#### Campos do Content
+
+| Campo | Tipo | Obrigatório | Descrição |
+|-------|------|-------------|-----------|
+| `ratingAtendimento` | number (1-3) | Sim | Avaliação do atendimento: 1=ruim, 2=médio, 3=bom |
+| `ratingProduto` | number (1-3) | Sim | Avaliação do produto/serviço: 1=ruim, 2=médio, 3=bom |
+| `comment` | string | Não | Comentário opcional |
+
+#### Classificação de Rating
+
+A média dos ratings é classificada em 3 níveis:
+
+| Média | Label | Ícone |
+|-------|-------|-------|
+| ≥ 2.5 | Bom | 👍 |
+| ≥ 1.5 | Médio | 👌 |
+| < 1.5 | Ruim | 👎 |
+
+---
+
 ## Status de Ordem
 
 | Status | Descrição |
 |--------|-----------|
+| `draft` | Rascunho, ordem ainda não publicada |
 | `pending` | Ordem criada, aguardando provedor |
-| `accepted` | Provedor aceitou, aguardando pagamento LN |
-| `paid` | Pagamento LN recebido |
-| `in_progress` | Provedor executando pagamento fiat |
+| `payment_received` | Pagamento Lightning recebido |
+| `accepted` | Provedor aceitou a ordem |
+| `processing` | Provedor executando pagamento fiat |
 | `awaiting_confirmation` | Comprovante enviado, aguardando confirmação |
 | `completed` | Ordem finalizada com sucesso |
-| `cancelled` | Ordem cancelada |
-| `disputed` | Ordem em disputa |
-| `expired` | Ordem expirada sem aceitação |
+| `liquidated` | Ordem auto-liquidada após 36h sem confirmação |
+| `cancelled` | Ordem cancelada (terminal absoluto, apenas `disputed` pode sobrescrever) |
+| `disputed` | Ordem em disputa (sobrescreve qualquer status não-terminal) |
+
+> **Nota**: Não existe status `expired`. Ordens não aceitas ficam em `pending` até cancelamento ou expiração do TTL no relay.
 
 ---
 
