@@ -21,7 +21,6 @@ import 'settings_screen.dart';
 import 'nostr_conversations_screen.dart';
 import 'order_status_screen.dart';
 import '../models/order.dart';
-import '../services/relay_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -489,34 +488,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       actions: [
-        // Relay status indicator
-        ListenableBuilder(
-          listenable: RelayService(),
-          builder: (context, _) {
-            final relay = RelayService();
-            final connected = relay.connectedCount;
-            final total = relay.activeRelays.length;
-            final Color dotColor;
-            final String tooltip;
-            if (connected == 0) {
-              dotColor = Colors.red;
-              tooltip = 'Desconectado dos relays';
-            } else if (connected < total) {
-              dotColor = Colors.orange;
-              tooltip = '$connected/$total relays conectados';
-            } else {
-              dotColor = Colors.green;
-              tooltip = 'Todos $total relays conectados';
-            }
-            return Tooltip(
-              message: tooltip,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Icon(Icons.cell_tower, color: dotColor, size: 18),
-              ),
-            );
-          },
-        ),
         IconButton(
           icon: const Icon(Icons.chat_bubble_outline, color: Colors.white),
           onPressed: _openMessages,

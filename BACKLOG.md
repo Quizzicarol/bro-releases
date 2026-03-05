@@ -22,10 +22,10 @@
 
 ## 🟡 Prioridade Média
 
-### ~~3. Indicador de Status de Conexão com Relays~~ ✅ CONCLUÍDO
-**Versão:** 1.0.131+337  
+### ~~3. Indicador de Status de Conexão com Relays~~ ✅ CONCLUÍDO → REMOVIDO
+**Versão:** 1.0.131+337 (adicionado) → 1.0.131+340 (removido)  
 **Concluído em:** Março 2026  
-**Resultado:** RelayService agora é ChangeNotifier. Ícone cell_tower no AppBar com cores (verde=todos, laranja=parcial, vermelho=nenhum). Tooltip mostra contagem X/Y.
+**Resultado:** Implementado e depois removido por poluir a interface. RelayService continua funcional internamente.
 
 ---
 
@@ -72,6 +72,7 @@ Adicionar `HapticFeedback.mediumImpact()` em ações críticas como "Aceitar Ord
 
 | Versão | Data | Principais Mudanças |
 |--------|------|---------------------|
+| 1.0.131+339 | 2026-03-05 | Fix disputa: auto-pay, reembolso admin, regenerar invoice, admin pay provider |
 | 1.0.131+336 | 2026-03-05 | Open source docs, Breez cert limpo do histórico, bump build |
 | 1.0.131+274 | 2026-02 | Security audit (18 vulns), NIP-44 proofs, auto-liquidação background, broLog |
 | 1.0.87+126 | 2026-01-31 | Correções de duplicação, auto-liquidação, aviso privacidade |
