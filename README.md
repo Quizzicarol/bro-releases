@@ -70,9 +70,9 @@ All communication is encrypted (NIP-44) and relayed through decentralized Nostr 
 ### For Providers (Bros)
 
 - 📥 Accept payment orders from the network
-- 💰 Earn spread on every transaction (configurable)
-- 🔒 Collateral tiers (Bronze → Diamond)
-- 📈 Reputation system with Web of Trust
+- 💰 Earn fees on every transaction (5%)
+- 🔒 Collateral tiers (Trial → Master)
+- 📈 Marketplace reviews and ratings
 - 🤖 Auto-liquidation after 36h confirmation timeout
 - 🛡️ AI-assisted dispute resolution
 
@@ -92,7 +92,7 @@ All communication is encrypted (NIP-44) and relayed through decentralized Nostr 
 | **🔐 Self-Custodial** | You hold your own keys and funds at all times. |
 | **📖 Open Source** | Fully transparent — audit the code yourself. |
 | **🛡️ Secure** | NIP-44 encrypted proofs, NIP-98 authenticated API, event signature verification. |
-| **🤝 Trustless** | Collateral system and reputation scoring minimize counterparty risk. |
+| **🤝 Trustless** | Collateral system and marketplace reviews minimize counterparty risk. |
 
 ---
 
@@ -122,10 +122,12 @@ Bro defines a set of custom Nostr event kinds for P2P order management:
 ### Order Lifecycle
 
 ```
-pending → accepted → paid → in_progress → awaiting_confirmation → completed
-   ↓                                              ↓
- expired                                      disputed → resolved
+pending → payment_received → accepted → processing → awaiting_confirmation → completed
+   ↓           ↓                                              ↓                  ↓
+cancelled   cancelled                                     disputed          liquidated
 ```
+
+Terminal statuses: `completed`, `cancelled`, `liquidated`. Only `disputed` can override a terminal status.
 
 ### Nostr NIPs Used
 
@@ -297,31 +299,32 @@ For details, see [SECURITY.md](SECURITY.md). To report a vulnerability, see [SEC
 
 ## Collateral Tiers
 
-Providers deposit collateral to unlock higher order limits:
+Providers deposit collateral (in BRL equivalent via Lightning) to unlock higher order limits:
 
 | Tier | Collateral | Max Order |
 |------|-----------|-----------|
-| 🥉 Bronze | 100,000 sats | R$ 500 |
-| 🥈 Silver | 500,000 sats | R$ 2,000 |
-| 🥇 Gold | 2,000,000 sats | R$ 10,000 |
-| 💎 Diamond | 10,000,000 sats | R$ 50,000 |
+| 🧪 Trial | R$ 10 | R$ 10 |
+| 🥉 Starter | R$ 50 | R$ 50 |
+| 🥈 Basic | R$ 200 | R$ 200 |
+| 🥇 Intermediate | R$ 500 | R$ 500 |
+| 💎 Advanced | R$ 1,000 | R$ 1,000 |
+| 👑 Master | R$ 3,000 | Unlimited |
+
+> **Note:** During the external testing phase, tiers are capped at R$ 200 max.
 
 ---
 
-## Reputation System
+## Reviews & Ratings
 
-Provider reputation is calculated from:
+Marketplace sellers are rated by buyers on a 3-point scale:
 
-| Metric | Weight |
-|--------|--------|
-| Success rate | 35% |
-| Dispute rate (negative) | 20% |
-| Total orders completed | 15% |
-| Average response time | 15% |
-| Total volume | 10% |
-| Days since last active | 5% |
+| Rating | Label |
+|--------|-------|
+| ≥ 2.5 | 👍 Good |
+| ≥ 1.5 | 👌 Average |
+| < 1.5 | 👎 Poor |
 
-Levels: ⭐ New → 🌱 Beginner → 🥉 Regular → 🥈 Good → 🥇 Excellent → 💎 Legendary
+Reviews are published as Nostr events and visible to all users.
 
 ---
 
