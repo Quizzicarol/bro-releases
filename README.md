@@ -291,7 +291,7 @@ Bro takes security seriously. Key protections include:
 - **Rate limiting** on backend (200 req/15min general, 5 req/min for writes)
 - **NSFW detection** on proof images
 
-For details, see [SECURITY.md](SECURITY.md). To report a vulnerability, email **carol@areabitcoin.com.br**.
+For details, see [SECURITY.md](SECURITY.md). To report a vulnerability, see [SECURITY.md](SECURITY.md#reporting-a-vulnerability).
 
 ---
 
