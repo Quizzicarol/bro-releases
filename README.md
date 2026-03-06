@@ -1,4 +1,4 @@
-﻿# Bro - Bitcoin P2P Trading
+﻿# Bro - Bitcoin P2P Bartering
 
 Download the latest APK from the [Releases](https://github.com/Quizzicarol/bro-releases/releases) page.
 
@@ -10,4 +10,4 @@ Download the latest APK from the [Releases](https://github.com/Quizzicarol/bro-r
 
 ## About
 
-Bro is a peer-to-peer Bitcoin trading app using the Nostr protocol.
+Bro is a peer-to-peer Bitcoin bartering app using the Nostr protocol.
