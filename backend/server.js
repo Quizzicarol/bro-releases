@@ -33,8 +33,10 @@ app.use(helmet({
 // CORS — restringir origens em produção
 // ============================================
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',') 
-  : ['*']; // Em dev permite tudo; em prod configurar via env
+  ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean)
+  : (process.env.NODE_ENV === 'production' 
+    ? (() => { throw new Error('ALLOWED_ORIGINS must be set in production'); })()
+    : ['*']); // Em dev permite tudo; em prod exige configuração
 
 app.use(cors({
   origin: allowedOrigins.includes('*') ? true : allowedOrigins,

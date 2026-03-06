@@ -41,7 +41,7 @@ router.post('/create', async (req, res) => {
 
   } catch (error) {
     console.error('Erro ao criar escrow:', error);
-    res.status(500).json({ error: 'Erro ao criar escrow', message: error.message });
+    res.status(500).json({ error: 'Erro ao criar escrow' });
   }
 });
 
@@ -113,7 +113,7 @@ router.post('/release', async (req, res) => {
 
   } catch (error) {
     console.error('Erro ao liberar escrow:', error);
-    res.status(500).json({ error: 'Erro ao liberar escrow', message: error.message });
+    res.status(500).json({ error: 'Erro ao liberar escrow' });
   }
 });
 
@@ -139,7 +139,7 @@ router.get('/:orderId', (req, res) => {
 
   } catch (error) {
     console.error('Erro ao consultar escrow:', error);
-    res.status(500).json({ error: 'Erro ao consultar escrow', message: error.message });
+    res.status(500).json({ error: 'Erro ao consultar escrow' });
   }
 });
 

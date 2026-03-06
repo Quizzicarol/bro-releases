@@ -54,7 +54,7 @@ router.post('/deposit', async (req, res) => {
 
   } catch (error) {
     console.error('Erro ao criar invoice de garantia:', error);
-    res.status(500).json({ error: 'Erro ao criar invoice', message: error.message });
+    res.status(500).json({ error: 'Erro ao criar invoice' });
   }
 });
 
@@ -85,7 +85,7 @@ router.post('/lock', async (req, res) => {
 
   } catch (error) {
     console.error('Erro ao bloquear garantia:', error);
-    res.status(500).json({ error: 'Erro ao bloquear garantia', message: error.message });
+    res.status(500).json({ error: 'Erro ao bloquear garantia' });
   }
 });
 
@@ -114,7 +114,7 @@ router.post('/unlock', async (req, res) => {
 
   } catch (error) {
     console.error('Erro ao desbloquear garantia:', error);
-    res.status(500).json({ error: 'Erro ao desbloquear garantia', message: error.message });
+    res.status(500).json({ error: 'Erro ao desbloquear garantia' });
   }
 });
 
@@ -147,7 +147,7 @@ router.get('/:providerId', (req, res) => {
 
   } catch (error) {
     console.error('Erro ao consultar garantia:', error);
-    res.status(500).json({ error: 'Erro ao consultar garantia', message: error.message });
+    res.status(500).json({ error: 'Erro ao consultar garantia' });
   }
 });
 

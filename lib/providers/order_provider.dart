@@ -1020,7 +1020,7 @@ class OrderProvider with ChangeNotifier {
       // Executar buscas EM PARALELO com tratamento de erro individual
       // PERFORMANCE v1.0.219+220: Pular fetchUserOrders se todas ordens são terminais
       // (mesma otimização já aplicada no syncOrdersFromNostr)
-      const terminalOnly = ['completed', 'cancelled', 'liquidated', 'disputed'];
+      const terminalOnly = ['completed', 'cancelled', 'liquidated'];
       final hasActiveUserOrders = _orders.isEmpty || _orders.any((o) => 
         (o.userPubkey == _currentUserPubkey || o.providerId == _currentUserPubkey) && 
         !terminalOnly.contains(o.status)
@@ -1114,7 +1114,7 @@ class OrderProvider with ChangeNotifier {
             
             // CORREÃâ¡ÃÆO: Apenas status FINAIS devem ser protegidos
             // accepted e awaiting_confirmation podem evoluir para completed
-            const protectedStatuses = ['cancelled', 'completed', 'liquidated', 'disputed'];
+            const protectedStatuses = ['cancelled', 'completed', 'liquidated'];
             if (protectedStatuses.contains(existing.status)) {
               continue;
             }
@@ -1231,7 +1231,7 @@ class OrderProvider with ChangeNotifier {
           
           // CORREÃâ¡ÃÆO: Status "accepted" NÃÆO deve ser protegido pois pode evoluir para completed
           // Apenas status finais devem ser protegidos
-          const protectedStatuses = ['cancelled', 'completed', 'liquidated', 'disputed'];
+          const protectedStatuses = ['cancelled', 'completed', 'liquidated'];
           if (protectedStatuses.contains(existing.status)) {
             continue;
           }
@@ -1252,9 +1252,9 @@ class OrderProvider with ChangeNotifier {
       if (_currentUserPubkey != null && _currentUserPubkey!.isNotEmpty) {
         
         // PERFORMANCE: SÃÂ³ buscar updates para ordens com status NÃÆO-FINAL
-        // Ordens completed/cancelled/liquidated/disputed nÃÂ£o precisam de updates
-        // Isso reduz de 26+ queries para apenas as ordens que PRECISAM ser atualizadas
-        const finalStatuses = ['completed', 'cancelled', 'liquidated', 'disputed'];
+        // Ordens completed/cancelled/liquidated nao precisam de updates
+        // NOTA: 'disputed' NAO e final - pode transicionar para completed via resolucao
+        const finalStatuses = ['completed', 'cancelled', 'liquidated'];
         final myOrderIds = _orders
             .where((o) => o.providerId == _currentUserPubkey && !finalStatuses.contains(o.status))
             .map((o) => o.id)
@@ -2644,7 +2644,7 @@ class OrderProvider with ChangeNotifier {
       // pular fetchUserOrders (que abre 9+ WebSocket connections).
       // Novas ordens do usuário aparecem via syncAllPendingOrdersFromNostr.
       // Só buscar do Nostr se: sem ordens locais (primeira vez) OU tem ordens ativas.
-      const terminalOnly = ['completed', 'cancelled', 'liquidated', 'disputed'];
+      const terminalOnly = ['completed', 'cancelled', 'liquidated'];
       final hasActiveOrders = _orders.isEmpty || _orders.any((o) => !terminalOnly.contains(o.status));
       
       List<Order> nostrOrders;
@@ -2700,7 +2700,7 @@ class OrderProvider with ChangeNotifier {
           
           // REGRA CRÃÂTICA: Apenas status FINAIS nÃÂ£o podem reverter
           // accepted e awaiting_confirmation podem evoluir para completed
-          final protectedStatuses = ['cancelled', 'completed', 'liquidated', 'disputed'];
+          final protectedStatuses = ['cancelled', 'completed', 'liquidated'];
           if (protectedStatuses.contains(existing.status)) {
             continue;
           }
@@ -2768,7 +2768,7 @@ class OrderProvider with ChangeNotifier {
           
           // PROTEÃâ¡ÃÆO CRÃÂTICA: Status finais NUNCA podem regredir
           // Isso evita que 'completed' volte para 'awaiting_confirmation'
-          const protectedStatuses = ['completed', 'cancelled', 'liquidated', 'disputed'];
+          const protectedStatuses = ['completed', 'cancelled', 'liquidated'];
           if (protectedStatuses.contains(existing.status) && !_isStatusMoreRecent(newStatus, existing.status)) {
             // Apenas atualizar providerId se necessÃÂ¡rio, sem mudar status
             if (newProviderId != null && newProviderId != existing.providerId) {
@@ -2914,13 +2914,17 @@ class OrderProvider with ChangeNotifier {
       return currentStatus != 'disputed';
     }
     
-    const finalStatuses = ['completed', 'liquidated', 'disputed'];
+    const finalStatuses = ['completed', 'liquidated'];
     if (finalStatuses.contains(currentStatus)) {
-      // Status final - sÃÂ³ pode virar disputed
-      if (currentStatus != 'disputed' && newStatus == 'disputed') {
+      // Status final - so pode virar disputed
+      if (newStatus == 'disputed') {
         return true;
       }
       return false;
+    }
+    // disputed pode transicionar para completed/cancelled (resolucao de disputa)
+    if (currentStatus == 'disputed') {
+      return newStatus == 'completed' || newStatus == 'cancelled';
     }
     
     // Ordem de progressÃÂ£o de status (SEM cancelled - tratado separadamente acima):

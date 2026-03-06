@@ -74,7 +74,7 @@ router.post('/create', async (req, res) => {
 
   } catch (error) {
     console.error('Erro ao criar ordem:', error);
-    res.status(500).json({ error: 'Erro ao criar ordem', message: error.message });
+    res.status(500).json({ error: 'Erro ao criar ordem' });
   }
 });
 
@@ -107,7 +107,7 @@ router.get('/available', (req, res) => {
 
   } catch (error) {
     console.error('Erro ao listar ordens disponíveis:', error);
-    res.status(500).json({ error: 'Erro ao listar ordens', message: error.message });
+    res.status(500).json({ error: 'Erro ao listar ordens' });
   }
 });
 
@@ -128,7 +128,7 @@ router.get('/:orderId', (req, res) => {
 
   } catch (error) {
     console.error('Erro ao buscar ordem:', error);
-    res.status(500).json({ error: 'Erro ao buscar ordem', message: error.message });
+    res.status(500).json({ error: 'Erro ao buscar ordem' });
   }
 });
 
@@ -154,7 +154,7 @@ router.get('/user/:userId', (req, res) => {
 
   } catch (error) {
     console.error('Erro ao listar ordens do usuário:', error);
-    res.status(500).json({ error: 'Erro ao listar ordens', message: error.message });
+    res.status(500).json({ error: 'Erro ao listar ordens' });
   }
 });
 
@@ -208,7 +208,7 @@ router.post('/:orderId/cancel', async (req, res) => {
 
   } catch (error) {
     console.error('Erro ao cancelar ordem:', error);
-    res.status(500).json({ error: 'Erro ao cancelar ordem', message: error.message });
+    res.status(500).json({ error: 'Erro ao cancelar ordem' });
   }
 });
 
@@ -260,7 +260,7 @@ router.post('/:orderId/accept', async (req, res) => {
 
   } catch (error) {
     console.error('Erro ao aceitar ordem:', error);
-    res.status(500).json({ error: 'Erro ao aceitar ordem', message: error.message });
+    res.status(500).json({ error: 'Erro ao aceitar ordem' });
   }
 });
 
@@ -308,7 +308,7 @@ router.post('/:orderId/submit-proof', async (req, res) => {
 
   } catch (error) {
     console.error('Erro ao enviar comprovante:', error);
-    res.status(500).json({ error: 'Erro ao enviar comprovante', message: error.message });
+    res.status(500).json({ error: 'Erro ao enviar comprovante' });
   }
 });
 
@@ -373,7 +373,7 @@ router.post('/:orderId/validate', async (req, res) => {
 
   } catch (error) {
     console.error('Erro ao validar pagamento:', error);
-    res.status(500).json({ error: 'Erro ao validar pagamento', message: error.message });
+    res.status(500).json({ error: 'Erro ao validar pagamento' });
   }
 });
 
