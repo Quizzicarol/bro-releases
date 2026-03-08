@@ -54,13 +54,11 @@ workflows:
           cd ios
           pod install
           
+      - name: Set up iOS code signing
+        script: xcode-project use-profiles
+
       - name: Build iOS
-        script: |
-          if xcode-project use-profiles 2>/dev/null; then
-            flutter build ipa --release --dart-define-from-file=env.json --export-options-plist=/Users/builder/export_options.plist
-          else
-            echo "⚠️ iOS code signing not configured — skipping iOS build"
-          fi
+        script: flutter build ipa --release --dart-define-from-file=env.json --export-options-plist=/Users/builder/export_options.plist
         
     artifacts:
       - build/**/outputs/**/*.apk
