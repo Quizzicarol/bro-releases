@@ -55,7 +55,7 @@ workflows:
           pod install
           
       - name: Set up iOS code signing
-        script: xcode-project use-profiles
+        script: xcode-project use-profiles --project ios/Runner.xcodeproj
 
       - name: Build iOS
         script: flutter build ipa --release --dart-define-from-file=env.json --export-options-plist=/Users/builder/export_options.plist
