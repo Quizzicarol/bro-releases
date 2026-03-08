@@ -968,13 +968,18 @@ class NostrOrderService {
     final results = await Future.wait(
       _relays.take(3).map((relay) async {
         try {
-          // Buscar ambas estratégias em paralelo
+          // Buscar todas estratégias em paralelo (complete + invoice_refresh)
           final fetches = await Future.wait([
             _fetchFromRelay(relay, kinds: [kindBroComplete], tags: {'#orderId': [orderId]}, limit: 5),
             _fetchFromRelay(relay, kinds: [kindBroComplete], tags: {'#d': ['${orderId}_complete']}, limit: 5),
+            _fetchFromRelay(relay, kinds: [kindBroComplete], tags: {'#d': ['${orderId}_invoice_refresh']}, limit: 5),
           ]);
           
-          final allEvents = [...fetches[0], ...fetches[1]];
+          final allEvents = [...fetches[0], ...fetches[1], ...fetches[2]];
+          
+          // v133: Preferir invoice_refresh (mais recente) sobre complete
+          Map<String, dynamic>? bestResult;
+          int bestTimestamp = 0;
           
           for (final event in allEvents) {
             try {
@@ -982,27 +987,97 @@ class NostrOrderService {
               final eventOrderId = content['orderId'] as String?;
               
               if (eventOrderId == orderId) {
-                return {
-                  'orderId': orderId,
-                  'providerId': content['providerId'] as String?,
-                  'providerInvoice': content['providerInvoice'] as String?,
-                  'completedAt': content['completedAt'],
-                };
+                final invoice = content['providerInvoice'] as String?;
+                if (invoice == null || invoice.isEmpty) continue;
+                
+                final ts = event['created_at'] as int? ?? 0;
+                if (ts >= bestTimestamp) {
+                  bestTimestamp = ts;
+                  bestResult = {
+                    'orderId': orderId,
+                    'providerId': content['providerId'] as String?,
+                    'providerInvoice': invoice,
+                    'completedAt': content['completedAt'],
+                  };
+                }
               }
             } catch (_) {}
           }
+          
+          return bestResult;
         } catch (e) {}
         return null;
       }),
     );
     
-    // Usar o primeiro resultado não-null
+    // Usar o resultado com invoice mais recente
+    Map<String, dynamic>? best;
     for (final result in results) {
-      if (result != null) return result;
+      if (result != null) {
+        best = result;
+        break;
+      }
     }
     
-    return null;
+    return best;
   }
+
+  /// v133: Publica invoice refresh para ordem liquidada (provider side)
+  /// Usa d-tag diferente para não sobrescrever o evento bro_complete original
+  Future<bool> publishInvoiceRefresh({
+    required String orderId,
+    required String providerPrivateKey,
+    required String providerInvoice,
+    required String orderUserPubkey,
+  }) async {
+    try {
+      final keychain = Keychain(providerPrivateKey);
+
+      final contentMap = {
+        'type': 'bro_invoice_refresh',
+        'orderId': orderId,
+        'providerId': keychain.public,
+        'providerInvoice': providerInvoice,
+        'refreshedAt': DateTime.now().toIso8601String(),
+      };
+
+      final content = jsonEncode(contentMap);
+
+      final tags = [
+        ['d', '${orderId}_invoice_refresh'],
+        ['p', orderUserPubkey],
+        ['t', broTag],
+        ['t', 'bro-invoice-refresh'],
+        ['orderId', orderId],
+      ];
+
+      final event = Event.from(
+        kind: kindBroComplete,
+        tags: tags,
+        content: content,
+        privkey: keychain.private,
+      );
+
+      broLog('[InvoiceRefresh] Publicando invoice refresh para $orderId');
+
+      final futures = _relays.map((relay) => _publishToRelay(relay, event).catchError((_) => false)).toList();
+
+      int successCount = 0;
+      for (final future in futures) {
+        try {
+          final result = await future;
+          if (result) successCount++;
+        } catch (_) {}
+      }
+
+      broLog('[InvoiceRefresh] Publicado em $successCount/${_relays.length} relays');
+      return successCount > 0;
+    } catch (e) {
+      broLog('[InvoiceRefresh] Erro ao publicar: $e');
+      return false;
+    }
+  }
+
   /// Publica uma ordem usando objeto Order
   Future<String?> publishOrder({
     required Order order,

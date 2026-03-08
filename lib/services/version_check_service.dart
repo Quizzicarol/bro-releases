@@ -27,7 +27,8 @@ class VersionCheckService {
 
   /// Build mínimo obrigatório (abaixo disso, forçar atualização)
   /// Atualizar este valor quando houver mudanças críticas de segurança/protocolo
-  static const int _minimumRequiredBuild = 238;
+  /// v132+354: Auto-pagamento de ordens liquidadas requer esta build mínima
+  static const int _minimumRequiredBuild = 354;
 
   /// Cache: não mostrar mais de uma vez por sessão
   bool _alreadyChecked = false;

@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import 'package:bro_app/services/log_utils.dart';
@@ -46,6 +46,10 @@ class OrderProvider with ChangeNotifier {
   // v132: Callback para auto-pagamento de ordens liquidadas
   // Setado pelo main.dart com acesso aos providers Lightning
   Future<bool> Function(String orderId, Order order)? onAutoPayLiquidation;
+
+  // v133: Callback para gerar invoice Lightning (provider side)
+  // Usado para renovar invoices expirados em ordens liquidadas
+  Future<String?> Function(int amountSats, String orderId)? onGenerateProviderInvoice;
 
   // Prefixo para salvar no SharedPreferences (serÃÂ¡ combinado com pubkey)
   static const String _ordersKeyPrefix = 'orders_';
@@ -1385,6 +1389,9 @@ class OrderProvider with ChangeNotifier {
       // AUTO-LIQUIDAÃâ¡ÃÆO: Verificar ordens awaiting_confirmation com prazo expirado
       await _checkAutoLiquidation();
       
+      // v133: Renovar invoices para ordens liquidadas (provider side)
+      await _renewInvoicesForLiquidatedAsProvider();
+      
       // SEGURANÃâ¡A: NÃÆO salvar ordens de outros usuÃÂ¡rios no storage local!
       // Apenas salvar as ordens que pertencem ao usuÃÂ¡rio atual
       // As ordens de outros ficam apenas em memÃÂ³ria (para visualizaÃÂ§ÃÂ£o do provedor)
@@ -2307,6 +2314,82 @@ class OrderProvider with ChangeNotifier {
       _isAutoPayingLiquidations = false;
     }
   }
+
+  /// v133: Renova invoices para ordens liquidadas onde EU sou o PROVEDOR
+  /// Gera nova invoice e publica no Nostr para o usuário poder pagar
+  bool _isRenewingInvoices = false;
+
+  Future<void> _renewInvoicesForLiquidatedAsProvider() async {
+    if (onGenerateProviderInvoice == null) return;
+    if (_isRenewingInvoices) return;
+    if (_currentUserPubkey == null || _currentUserPubkey!.isEmpty) return;
+
+    _isRenewingInvoices = true;
+
+    try {
+      final unpaidAsProvider = _orders.where((order) {
+        if (order.status != 'liquidated') return false;
+        final providerId = order.providerId ?? order.metadata?['providerId'] ?? order.metadata?['provider_id'] ?? '';
+        if (providerId != _currentUserPubkey) return false;
+        if (order.metadata?['invoiceRefreshed'] == true) return false;
+        if (order.metadata?['providerPaymentReceived'] == true) return false;
+        if (order.metadata?['autoPaymentCompleted'] == true) return false;
+        return true;
+      }).toList();
+
+      if (unpaidAsProvider.isEmpty) return;
+
+      broLog('[InvoiceRefresh] ${unpaidAsProvider.length} ordens liquidadas precisam de invoice refresh');
+
+      final privateKey = _nostrService.privateKey;
+      if (privateKey == null) return;
+
+      for (final order in unpaidAsProvider) {
+        try {
+          final amountSats = (order.btcAmount * 100000000).round();
+          if (amountSats <= 0) continue;
+
+          broLog('[InvoiceRefresh] Gerando invoice de $amountSats sats para ${order.id.substring(0, 8)}...');
+          final invoice = await onGenerateProviderInvoice!(amountSats, order.id);
+          if (invoice == null || invoice.isEmpty) {
+            broLog('[InvoiceRefresh] ⚠️ Falha ao gerar invoice para ${order.id.substring(0, 8)}');
+            continue;
+          }
+
+          final success = await _nostrOrderService.publishInvoiceRefresh(
+            orderId: order.id,
+            providerPrivateKey: privateKey,
+            providerInvoice: invoice,
+            orderUserPubkey: order.userPubkey ?? '',
+          );
+
+          if (success) {
+            final index = _orders.indexWhere((o) => o.id == order.id);
+            if (index != -1) {
+              _orders[index] = _orders[index].copyWith(
+                metadata: {
+                  ...(_orders[index].metadata ?? {}),
+                  'providerInvoice': invoice,
+                  'invoiceRefreshed': true,
+                  'invoiceRefreshedAt': DateTime.now().toIso8601String(),
+                },
+              );
+            }
+            broLog('[InvoiceRefresh] ✅ Invoice refreshed para ${order.id.substring(0, 8)}');
+          }
+        } catch (e) {
+          broLog('[InvoiceRefresh] ❌ Erro para ${order.id.substring(0, 8)}: $e');
+        }
+      }
+
+      await _saveOrders();
+    } catch (e) {
+      broLog('[InvoiceRefresh] Erro geral: $e');
+    } finally {
+      _isRenewingInvoices = false;
+    }
+  }
+
   Future<Map<String, dynamic>?> validateBoleto(String code) async {
     _isLoading = true;
     _error = null;
@@ -2950,6 +3033,9 @@ class OrderProvider with ChangeNotifier {
       
       // v132: Auto-pagamento de ordens liquidadas sem pagamento
       await _autoPayLiquidatedOrders();
+      
+      // v133: Renovar invoices para ordens liquidadas (provider side)
+      await _renewInvoicesForLiquidatedAsProvider();
       
       // v253: AUTO-REPAIR: Tambem reparar no sync do usuario
       // v259: Timeout global no auto-repair para nao travar sync

@@ -307,6 +307,28 @@ class BroApp extends StatelessWidget {
             return false;
           };
 
+          // v133: Callback para gerar invoice Lightning (provider side)
+          orderProvider.onGenerateProviderInvoice = (int amountSats, String orderId) async {
+            try {
+              Map<String, dynamic>? result;
+              if (breezProvider.isInitialized) {
+                result = await breezProvider.createInvoice(
+                  amountSats: amountSats,
+                  description: 'Bro - Ordem ${orderId.substring(0, 8)}',
+                ).timeout(const Duration(seconds: 30));
+              } else if (liquidProvider.isInitialized) {
+                result = await liquidProvider.createInvoice(
+                  amountSats: amountSats,
+                  description: 'Bro - Ordem ${orderId.substring(0, 8)}',
+                ).timeout(const Duration(seconds: 30));
+              }
+              return result?['bolt11'] as String?;
+            } catch (e) {
+              broLog('⚠️ [InvoiceRefresh-Main] Erro ao gerar invoice: $e');
+              return null;
+            }
+          };
+
           // Verificar reconciliacao na inicializacao (quando SDK estiver pronto)
           _scheduleReconciliationOnStartup(breezProvider, orderProvider);
 
