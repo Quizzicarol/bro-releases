@@ -10,6 +10,7 @@ import '../services/dispute_service.dart';
 import '../services/lnaddress_service.dart';
 import '../services/withdrawal_service.dart';
 import '../services/nostr_order_service.dart';
+import '../services/nip44_service.dart';
 import '../services/platform_fee_service.dart';
 import '../models/withdrawal.dart';
 import '../providers/breez_provider_export.dart';
@@ -1937,9 +1938,35 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
     // Antigo: receipt_url, confirmation_code, receipt_submitted_at
     // Novo (via Nostr): proofImage, proofReceivedAt
     // Bro: paymentProof (usado pelo provider_order_detail_screen)
-    final receiptUrl = metadata?['receipt_url'] as String? 
+    String? receiptUrl = metadata?['receipt_url'] as String? 
         ?? metadata?['proofImage'] as String?
         ?? metadata?['paymentProof'] as String?;
+    
+    // Filtrar marcador de criptografia — não é uma imagem válida
+    if (receiptUrl != null && receiptUrl.startsWith('[encrypted:')) {
+      receiptUrl = null;
+    }
+    
+    // Tentar re-descriptografar on-demand se temos dados NIP-44
+    if (receiptUrl == null && metadata?['proofImage_nip44'] != null) {
+      try {
+        final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+        final privateKey = orderProvider.nostrPrivateKey;
+        final senderPubkey = metadata?['proofImage_senderPubkey'] as String?;
+        if (privateKey != null && senderPubkey != null) {
+          final nip44 = Nip44Service();
+          receiptUrl = nip44.decryptBetween(
+            metadata!['proofImage_nip44'] as String,
+            privateKey,
+            senderPubkey,
+          );
+          broLog('🔓 proofImage re-descriptografado on-demand na UI');
+        }
+      } catch (e) {
+        broLog('⚠️ Falha ao re-descriptografar proofImage na UI: $e');
+      }
+    }
+    
     final confirmationCode = metadata?['confirmation_code'] as String?;
     final submittedAt = metadata?['receipt_submitted_at'] as String? ?? metadata?['proofReceivedAt'] as String?;
 

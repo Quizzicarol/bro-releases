@@ -2105,9 +2105,15 @@ class NostrOrderService {
           broLog('🔓 proofImage descriptografado com NIP-44');
         } catch (e) {
           broLog('⚠️ Falha ao descriptografar proofImage: $e');
-          // Manter marcador [encrypted:nip44v2] como fallback
+          // Não usar o marcador como imagem — limpar para evitar imagem quebrada
+          proofImage = null;
         }
       }
+    }
+    
+    // Se proofImage é o marcador de criptografia, não usar como imagem
+    if (proofImage != null && proofImage.startsWith('[encrypted:')) {
+      proofImage = null;
     }
     
     // NOTA: Não bloqueamos mais "completed" do provedor porque:
@@ -2129,6 +2135,11 @@ class NostrOrderService {
       if (proofImage != null && proofImage.isNotEmpty) {
         updatedMetadata['proofImage'] = proofImage;
         updatedMetadata['paymentProof'] = proofImage; // Compatibilidade
+      }
+      // Preservar dados NIP-44 para re-descriptografia futura
+      if (proofImageNip44 != null && proofImageNip44.isNotEmpty) {
+        updatedMetadata['proofImage_nip44'] = proofImageNip44;
+        updatedMetadata['proofImage_senderPubkey'] = update['eventAuthorPubkey'] as String? ?? providerId;
       }
       if (completedAt != null) {
         updatedMetadata['proofReceivedAt'] = completedAt;
