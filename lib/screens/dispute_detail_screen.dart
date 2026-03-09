@@ -92,12 +92,16 @@ class _DisputeDetailScreenState extends State<DisputeDetailScreen> {
         broLog('⚠️ Erro ao buscar provider: $e');
       }
     }
-    _fetchProofImage();
+    // Aguardar dados essenciais ANTES de rodar análise forense
+    // (proof, evidence, losses são necessários para análise precisa)
+    await Future.wait([
+      _fetchProofImage(),
+      _fetchAllEvidence(), // v236
+      _fetchDisputeLosses(), // v247
+    ]);
     _fetchMediatorMessages();
-    _fetchAllEvidence(); // v236
-    _fetchDisputeLosses(); // v247
     _fetchExistingResolution(); // v248: Verificar se já foi resolvida
-    _fetchAgentAnalysis(); // Phase 4: AI Agent
+    _fetchAgentAnalysis(); // Phase 4: AI Agent — agora com dados carregados
   }
   
   /// v248: Verifica se a disputa já foi resolvida anteriormente
@@ -1522,14 +1526,369 @@ class _DisputeDetailScreenState extends State<DisputeDetailScreen> {
 
   Future<void> _fetchAgentAnalysis() async {
     if (orderId.isEmpty) return;
+    
+    // Tentar análise do backend primeiro
     try {
       final analysis = await ApiService().getAgentAnalysis(orderId);
       if (analysis != null && analysis['success'] == true && mounted) {
         setState(() => _agentAnalysis = analysis['analysis'] as Map<String, dynamic>?);
+        if (_agentAnalysis != null) return; // Backend respondeu com análise
       }
     } catch (e) {
-      broLog('⚠️ Agent analysis não disponível: $e');
+      broLog('⚠️ Agent backend não disponível: $e');
     }
+    
+    // Fallback: análise heurística local (funciona sem backend)
+    if (mounted) {
+      final localAnalysis = _runLocalHeuristics();
+      if (localAnalysis != null) {
+        setState(() => _agentAnalysis = localAnalysis);
+        broLog('🤖 Análise heurística local aplicada: ${localAnalysis['suggestion']} (${((localAnalysis['confidence'] as num) * 100).toStringAsFixed(0)}%)');
+      }
+    }
+  }
+
+  /// Análise forense local — investiga comprovante, E2E PIX, cruzamento de
+  /// dados e padrões de fraude. Princípio: comprovante sem prova verificável
+  /// (E2E válido) não tem valor. Imagem sozinha NÃO prova pagamento.
+  Map<String, dynamic>? _runLocalHeuristics() {
+    final dispute = widget.dispute;
+    final disputeOpenedBy = openedBy;
+    final disputeReason = reason;
+    final disputeDescription = description;
+    final hasUserEvidence = (dispute['user_evidence_nip44'] as String?)?.isNotEmpty == true &&
+        (dispute['user_evidence_nip44'] as String).length > 100;
+    final hasProofImage = _proofImageData != null && _proofImageData!.isNotEmpty;
+    final isPix = paymentType.toLowerCase().contains('pix') || pixKey.isNotEmpty;
+
+    // Pontuação: positivo = favorece provedor, negativo = favorece usuário
+    double score = 0;
+    List<Map<String, dynamic>> findings = [];
+    
+    // Flags compostas para cruzamento
+    bool proofHasValidE2e = false;
+    bool proofMissingE2e = false;
+    bool proofHasInvalidE2e = false;
+    bool proofImageExists = hasProofImage;
+    bool e2eDateMismatch = false;
+
+    // ═══════════════════════════════════════════
+    // 1. VALIDAÇÃO E2E DO PIX (ANÁLISE MAIS IMPORTANTE)
+    // Um PIX real SEMPRE gera um E2E. Sem E2E = sem prova de transação.
+    // ═══════════════════════════════════════════
+    if (isPix) {
+      final e2eId = _fetchedE2eId ?? 
+                    dispute['e2eId'] as String? ?? 
+                    dispute['proof_e2eId'] as String? ?? '';
+      
+      if (e2eId.isEmpty) {
+        proofMissingE2e = true;
+        score -= 0.35;
+        findings.add({'icon': '🔴', 'text': 'Código E2E do PIX AUSENTE — toda transação PIX gera um identificador E2E único e obrigatório. Sem ele, é impossível comprovar que qualquer pagamento PIX foi realizado. Comprovante sem E2E não tem validade.', 'severity': 'red'});
+      } else {
+        final e2eRegex = RegExp(r'^E(\d{8})(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(.+)$');
+        final match = e2eRegex.firstMatch(e2eId);
+        
+        if (match != null) {
+          final ispb = match.group(1)!;
+          final year = match.group(2)!;
+          final month = match.group(3)!;
+          final day = match.group(4)!;
+          final hour = match.group(5)!;
+          final minute = match.group(6)!;
+          
+          const ispbMap = {
+            '00000000': 'Banco do Brasil', '00360305': 'Caixa Econômica',
+            '60701190': 'Itaú', '60746948': 'Bradesco', '90400888': 'Santander',
+            '00416968': 'Banco Inter', '18236120': 'Nubank', '09089356': 'Efí/Gerencianet',
+            '13140088': 'PagBank/PagSeguro', '60394079': 'Mercado Pago',
+            '11165756': 'C6 Bank', '07679404': 'Banco Original',
+            '92894922': 'Banrisul', '01181521': 'Stone',
+          };
+          
+          proofHasValidE2e = true;
+          score += 0.15;
+          findings.add({'icon': '🟢', 'text': 'E2E com formato válido do Banco Central', 'severity': 'green'});
+          
+          final bankName = ispbMap[ispb];
+          if (bankName != null) {
+            score += 0.05;
+            findings.add({'icon': '🟢', 'text': 'Banco de origem identificado: $bankName (ISPB: $ispb)', 'severity': 'green'});
+          } else {
+            findings.add({'icon': '🟡', 'text': 'ISPB $ispb não reconhecido — banco menor ou código incomum', 'severity': 'yellow'});
+          }
+          
+          // Cruzar data do E2E com data da ordem/disputa
+          if (createdAtStr.isNotEmpty) {
+            try {
+              final disputeDt = DateTime.parse(createdAtStr);
+              final e2eDt = DateTime(
+                int.parse(year), int.parse(month), int.parse(day),
+                int.parse(hour), int.parse(minute),
+              );
+              final diff = disputeDt.difference(e2eDt);
+              
+              if (diff.inHours < 0) {
+                e2eDateMismatch = true;
+                score -= 0.40;
+                findings.add({'icon': '🔴', 'text': 'FRAUDE PROVÁVEL: Data do E2E ($day/$month/$year $hour:$minute) é POSTERIOR à abertura da disputa — PIX teria sido feito depois da reclamação. Isto é impossível em transação legítima.', 'severity': 'red'});
+              } else if (diff.inHours <= 48) {
+                score += 0.10;
+                findings.add({'icon': '🟢', 'text': 'Data do E2E ($day/$month/$year $hour:$minute) compatível com o período da ordem', 'severity': 'green'});
+              } else {
+                e2eDateMismatch = true;
+                score -= 0.20;
+                findings.add({'icon': '🔴', 'text': 'Data do E2E ($day/$month/$year $hour:$minute) é de ${diff.inDays} dias ANTES da disputa — possível reutilização de comprovante antigo', 'severity': 'red'});
+              }
+            } catch (_) {}
+          }
+
+          final tail = match.group(8) ?? '';
+          if (tail.length < 8) {
+            score -= 0.10;
+            findings.add({'icon': '🔴', 'text': 'Hash do E2E truncado ($tail) — código parece ter sido editado ou digitado manualmente', 'severity': 'red'});
+          }
+        } else {
+          proofHasInvalidE2e = true;
+          score -= 0.30;
+          findings.add({'icon': '🔴', 'text': 'E2E "$e2eId" com formato INVÁLIDO — não segue o padrão do Banco Central (E + 8 dígitos ISPB + datetime + hash). Código provavelmente fabricado ou copiado de outro contexto.', 'severity': 'red'});
+        }
+      }
+    }
+
+    // ═══════════════════════════════════════════
+    // 2. ANÁLISE DO COMPROVANTE (IMAGEM)
+    // IMPORTANTE: Imagem de comprovante SEM E2E válido não prova nada.
+    // Qualquer pessoa pode fabricar uma imagem de "transferência".
+    // ═══════════════════════════════════════════
+    if (hasProofImage) {
+      final proofBytes = _proofImageData!.length;
+      final estimatedImageBytes = (proofBytes * 0.75).round();
+      final sizeKB = (estimatedImageBytes / 1024).toStringAsFixed(1);
+
+      if (isPix && (proofMissingE2e || proofHasInvalidE2e)) {
+        // Comprovante PIX SEM E2E válido = suspeito por definição
+        score -= 0.20;
+        findings.add({'icon': '🔴', 'text': 'Provedor enviou imagem de comprovante ($sizeKB KB) mas SEM código E2E válido — uma imagem sozinha NÃO comprova pagamento PIX. Qualquer pessoa pode fabricar ou editar uma captura de tela de transferência.', 'severity': 'red'});
+      } else if (isPix && proofHasValidE2e && !e2eDateMismatch) {
+        // Comprovante PIX COM E2E válido e data ok = forte evidência
+        if (estimatedImageBytes < 3000) {
+          findings.add({'icon': '🟡', 'text': 'Imagem do comprovante muito pequena ($sizeKB KB) mas E2E válido — prova parcial', 'severity': 'yellow'});
+        } else {
+          score += 0.10;
+          findings.add({'icon': '🟢', 'text': 'Comprovante ($sizeKB KB) acompanhado de E2E válido — evidência consistente', 'severity': 'green'});
+        }
+      } else if (!isPix) {
+        // Pagamento não-PIX: comprovante tem mais peso (sem E2E para validar)
+        if (estimatedImageBytes < 3000) {
+          score -= 0.10;
+          findings.add({'icon': '🟡', 'text': 'Comprovante muito pequeno ($sizeKB KB) — pode ser imagem fabricada', 'severity': 'yellow'});
+        } else {
+          score += 0.05;
+          findings.add({'icon': '🟡', 'text': 'Comprovante enviado ($sizeKB KB) — verificação visual necessária (sem E2E para validar automaticamente)', 'severity': 'yellow'});
+        }
+      }
+      
+      // Verificar formato de imagem
+      final b64 = _proofImageData!.trim();
+      final looksLikeJpeg = b64.startsWith('/9j/') || b64.startsWith('/9j');
+      final looksLikePng = b64.startsWith('iVBOR');
+      final hasDataUri = b64.startsWith('data:image/');
+      if (!looksLikeJpeg && !looksLikePng && !hasDataUri && b64.length > 100) {
+        score -= 0.05;
+        findings.add({'icon': '🟡', 'text': 'Formato da imagem não identificado (não é JPEG/PNG padrão) — pode ser arquivo corrompido ou manipulado', 'severity': 'yellow'});
+      }
+    } else if (_proofEncrypted) {
+      score -= 0.10;
+      findings.add({'icon': '🟡', 'text': 'Comprovante criptografado (NIP-44) — não foi possível analisar. Solicite ao provedor que reenvie.', 'severity': 'yellow'});
+    } else {
+      // Sem comprovante nenhum
+      score -= 0.30;
+      findings.add({'icon': '🔴', 'text': 'Provedor NÃO enviou nenhum comprovante de pagamento — se o provedor alega ter pago, deveria ter prova. Ausência de comprovante é forte indício contra o provedor.', 'severity': 'red'});
+    }
+
+    // ═══════════════════════════════════════════
+    // 3. ANÁLISE DA DISPUTA (QUEM ABRIU E POR QUÊ)
+    // ═══════════════════════════════════════════
+    final isNoResponse = disputeReason.contains('não respondeu') || 
+        disputeReason.contains('no_response') ||
+        disputeReason.contains('provider_no_response') ||
+        disputeReason.contains('Provedor não respondeu');
+    
+    final isPaymentIssue = disputeReason.contains('pagamento') ||
+        disputeReason.contains('payment') ||
+        disputeReason.contains('não receb') ||
+        disputeReason.contains('not_received') ||
+        disputeReason.contains('valor') ||
+        disputeReason.contains('falso') ||
+        disputeReason.contains('fake');
+
+    if (disputeOpenedBy == 'user') {
+      if (isNoResponse) {
+        score -= 0.20;
+        findings.add({'icon': '🔴', 'text': 'Usuário relata que provedor NÃO RESPONDEU — abandono de ordem pelo provedor. Sats do escrow devem retornar ao usuário.', 'severity': 'red'});
+      } else if (isPaymentIssue && !proofHasValidE2e) {
+        score -= 0.15;
+        findings.add({'icon': '🔴', 'text': 'Usuário contesta o pagamento E provedor não tem prova verificável (E2E) — evidência favorece o usuário', 'severity': 'red'});
+      } else if (isPaymentIssue && proofHasValidE2e) {
+        findings.add({'icon': '🔵', 'text': 'Usuário contesta o pagamento, mas provedor tem E2E válido — verificar se valores e datas conferem', 'severity': 'blue'});
+      } else {
+        findings.add({'icon': '🔵', 'text': 'Disputa aberta pelo usuário — analisar evidências do provedor', 'severity': 'blue'});
+      }
+    } else if (disputeOpenedBy == 'provider') {
+      if (hasUserEvidence) {
+        score -= 0.10;
+        findings.add({'icon': '🟠', 'text': 'Provedor abriu disputa mas o usuário já enviou evidência — analisar consistência', 'severity': 'yellow'});
+      } else {
+        findings.add({'icon': '🔵', 'text': 'Provedor abriu disputa — verificar se tem comprovante/E2E para justificar', 'severity': 'blue'});
+      }
+    }
+
+    // Descrição da disputa
+    if (disputeDescription.length >= 80) {
+      findings.add({'icon': '🔵', 'text': 'Descrição detalhada (${disputeDescription.length} caracteres)', 'severity': 'blue'});
+    } else if (disputeDescription.length < 20 && disputeOpenedBy == 'provider') {
+      score -= 0.05;
+      findings.add({'icon': '🟡', 'text': 'Provedor abriu disputa com descrição muito curta (${disputeDescription.length} caracteres) — pouca justificativa', 'severity': 'yellow'});
+    }
+
+    // ═══════════════════════════════════════════
+    // 4. ANÁLISE DE EVIDÊNCIAS DAS PARTES
+    // ═══════════════════════════════════════════
+    if (_allEvidence.isNotEmpty) {
+      final userEvidences = _allEvidence.where((e) => e['senderRole'] == 'user').toList();
+      final providerEvidences = _allEvidence.where((e) => e['senderRole'] == 'provider').toList();
+      
+      if (userEvidences.isNotEmpty && providerEvidences.isEmpty) {
+        score -= 0.10;
+        findings.add({'icon': '🔴', 'text': 'Usuário enviou ${userEvidences.length} evidência(s) durante a disputa, provedor NÃO enviou nenhuma — provedor não se defendeu', 'severity': 'red'});
+      } else if (providerEvidences.isNotEmpty && userEvidences.isEmpty) {
+        // Provedor enviou evidência extra, mas sem E2E ainda não vale muito
+        if (proofHasValidE2e) {
+          score += 0.05;
+          findings.add({'icon': '🟢', 'text': 'Provedor enviou ${providerEvidences.length} evidência(s) extra — reforça defesa com E2E válido', 'severity': 'green'});
+        } else {
+          findings.add({'icon': '🟡', 'text': 'Provedor enviou ${providerEvidences.length} evidência(s) extra mas sem E2E válido — imagens adicionais não substituem prova de transação', 'severity': 'yellow'});
+        }
+      } else if (userEvidences.isNotEmpty && providerEvidences.isNotEmpty) {
+        findings.add({'icon': '🔵', 'text': 'Ambas as partes enviaram evidências (${userEvidences.length} do usuário, ${providerEvidences.length} do provedor)', 'severity': 'blue'});
+      }
+    } else if (!_loadingEvidence) {
+      findings.add({'icon': '🟡', 'text': 'Nenhuma evidência adicional enviada pelas partes durante a disputa', 'severity': 'yellow'});
+    }
+
+    // ═══════════════════════════════════════════
+    // 5. HISTÓRICO DE REINCIDÊNCIA
+    // ═══════════════════════════════════════════
+    if (_userDisputeLosses >= 3) {
+      score += 0.10;
+      findings.add({'icon': '🔴', 'text': '⚠️ Usuário REINCIDENTE: $_userDisputeLosses disputas perdidas — perfil de risco alto', 'severity': 'red'});
+    } else if (_userDisputeLosses >= 1) {
+      score += 0.03;
+      findings.add({'icon': '🟡', 'text': 'Usuário perdeu $_userDisputeLosses disputa(s) anteriormente', 'severity': 'yellow'});
+    }
+    if (_providerDisputeLosses >= 3) {
+      score -= 0.15;
+      findings.add({'icon': '🔴', 'text': '⚠️ Provedor REINCIDENTE: $_providerDisputeLosses disputas perdidas — perfil de GOLPISTA', 'severity': 'red'});
+    } else if (_providerDisputeLosses >= 1) {
+      score -= 0.05;
+      findings.add({'icon': '🟡', 'text': 'Provedor perdeu $_providerDisputeLosses disputa(s) anteriormente', 'severity': 'yellow'});
+    }
+
+    // ═══════════════════════════════════════════
+    // 6. CRUZAMENTO DE VALORES
+    // ═══════════════════════════════════════════
+    final brl = amountBrl;
+    final sats = amountSats;
+    if (brl != null && sats != null) {
+      final brlVal = double.tryParse(brl.toString()) ?? 0;
+      final satsVal = double.tryParse(sats.toString()) ?? 0;
+
+      if (brlVal > 0 && satsVal > 0) {
+        final satsPerBrl = satsVal / brlVal;
+        if (satsPerBrl < 50 || satsPerBrl > 10000) {
+          score -= 0.05;
+          findings.add({'icon': '🟡', 'text': 'Proporção sats/BRL incomum: ${satsPerBrl.toStringAsFixed(0)} sats/R\$ — valores da ordem podem estar incorretos', 'severity': 'yellow'});
+        }
+      }
+      
+      if (brlVal == 0 && satsVal == 0) {
+        findings.add({'icon': '🟡', 'text': 'Valores da ordem são zero — dados incompletos', 'severity': 'yellow'});
+      }
+    }
+
+    // ═══════════════════════════════════════════
+    // 7. SINAIS COMPOSTOS (cruzamento de red flags)
+    // ═══════════════════════════════════════════
+    if (isPix && proofImageExists && (proofMissingE2e || proofHasInvalidE2e)) {
+      // Padrão clássico de golpe: envia imagem mas sem E2E
+      score -= 0.15;
+      findings.add({'icon': '🚨', 'text': 'PADRÃO SUSPEITO: Provedor enviou imagem de "comprovante" mas sem código E2E verificável. Este é o padrão mais comum de comprovante falso — imagem fabricada ou de outra transação.', 'severity': 'red'});
+    }
+    if (isPix && proofHasValidE2e && e2eDateMismatch) {
+      score -= 0.10;
+      findings.add({'icon': '🚨', 'text': 'INCONSISTÊNCIA: E2E existe mas a data não bate com a ordem — possível reutilização de comprovante de outra transação.', 'severity': 'red'});
+    }
+    if (disputeOpenedBy == 'user' && !proofHasValidE2e && !hasUserEvidence) {
+      // Nem usuário nem provedor tem prova forte, mas provedor deveria ter
+      findings.add({'icon': '🔵', 'text': 'Nenhuma das partes tem prova verificável, mas o ônus da prova é do PROVEDOR (quem alega ter pago deve provar). Na dúvida, escrow retorna ao usuário.', 'severity': 'blue'});
+    }
+
+    // ═══════════════════════════════════════════
+    // VEREDITO: Converter score em decisão
+    // Limiar baixo: score <= -0.15 já sugere favor do usuário
+    // Provedor precisa score >= 0.25 (prova forte) para ganhar
+    // ═══════════════════════════════════════════
+    String suggestion;
+    double confidence;
+    String summaryReason;
+
+    final redFlags = findings.where((f) => f['severity'] == 'red').length;
+    final greenFlags = findings.where((f) => f['severity'] == 'green').length;
+
+    if (score <= -0.15) {
+      suggestion = 'resolved_user';
+      confidence = (0.60 + (-score - 0.15) * 0.6).clamp(0.55, 0.95);
+      if (redFlags >= 3) {
+        summaryReason = '🚨 VEREDITO: Forte indicação de FRAUDE do provedor — $redFlags irregularidades detectadas. Recomenda-se resolver a favor do USUÁRIO.';
+      } else {
+        summaryReason = '🔍 VEREDITO: Evidências insuficientes ou suspeitas do provedor ($redFlags red flag(s)). Recomenda-se resolver a favor do USUÁRIO.';
+      }
+    } else if (score >= 0.25) {
+      suggestion = 'resolved_provider';
+      confidence = (0.60 + (score - 0.25) * 0.5).clamp(0.55, 0.90);
+      summaryReason = '🔍 VEREDITO: Provedor apresentou provas verificáveis ($greenFlags indicador(es) positivo(s)). Comprovante e E2E compatíveis com a ordem.';
+    } else if (score >= 0.10) {
+      suggestion = 'escalate';
+      confidence = (0.45 + score * 0.3).clamp(0.40, 0.60);
+      summaryReason = '🔍 VEREDITO: Provedor tem evidência parcial mas insuficiente para decisão automática. Revisão detalhada recomendada.';
+    } else {
+      suggestion = 'escalate';
+      confidence = (0.50 + (-score) * 0.3).clamp(0.45, 0.65);
+      summaryReason = '🔍 VEREDITO: Evidências pendentes ou contraditórias. Tendência contra o provedor mas requer confirmação do mediador.';
+    }
+
+    // Tier
+    int tier;
+    if (confidence >= 0.90) {
+      tier = 1; // AUTO
+    } else if (confidence >= 0.60) {
+      tier = 2; // SUGGEST
+    } else {
+      tier = 3; // ESCALATE
+    }
+    
+    return {
+      'suggestion': suggestion,
+      'confidence': confidence,
+      'reason': summaryReason,
+      'findings': findings,
+      'redFlags': redFlags,
+      'greenFlags': greenFlags,
+      'score': score,
+      'tier': tier,
+      'source': 'local_heuristic',
+    };
   }
 
   Widget _buildAgentSuggestion() {
@@ -1539,6 +1898,11 @@ class _DisputeDetailScreenState extends State<DisputeDetailScreen> {
     final recommendation = _agentAnalysis!['suggestion'] ?? '';
     final reason = _agentAnalysis!['reason'] ?? '';
     final tier = _agentAnalysis!['tier'] ?? 0;
+    final isLocal = _agentAnalysis!['source'] == 'local_heuristic';
+    final agentLabel = isLocal ? 'Análise Heurística (local)' : 'Sugestão do AI Agent';
+    final findings = _agentAnalysis!['findings'] as List<Map<String, dynamic>>?;
+    final redFlags = _agentAnalysis!['redFlags'] as int? ?? 0;
+    final greenFlags = _agentAnalysis!['greenFlags'] as int? ?? 0;
 
     Color confidenceColor;
     if (confidence >= 0.9) {
@@ -1588,10 +1952,10 @@ class _DisputeDetailScreenState extends State<DisputeDetailScreen> {
             children: [
               const Icon(Icons.smart_toy, color: Colors.purple, size: 20),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'Sugestão do AI Agent',
-                  style: TextStyle(
+                  agentLabel,
+                  style: const TextStyle(
                     color: Colors.purple,
                     fontWeight: FontWeight.bold,
                     fontSize: 15,
@@ -1641,6 +2005,93 @@ class _DisputeDetailScreenState extends State<DisputeDetailScreen> {
               reason,
               style: const TextStyle(color: Colors.white54, fontSize: 12),
             ),
+          ],
+          // Botão re-analisar (roda heurística novamente com dados atualizados)
+          if (isLocal) ...[  
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  final updated = _runLocalHeuristics();
+                  if (updated != null && mounted) {
+                    setState(() => _agentAnalysis = updated);
+                  }
+                },
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Reanalisar com dados atuais', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.purple,
+                  side: const BorderSide(color: Colors.purple),
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                ),
+              ),
+            ),
+          ],
+          // Mostrar indicadores resumidos
+          if (redFlags > 0 || greenFlags > 0) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                if (redFlags > 0) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text('🔴 $redFlags red flag${redFlags > 1 ? 's' : ''}',
+                      style: const TextStyle(color: Colors.redAccent, fontSize: 11)),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                if (greenFlags > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text('🟢 $greenFlags ok',
+                      style: const TextStyle(color: Colors.greenAccent, fontSize: 11)),
+                  ),
+              ],
+            ),
+          ],
+          // Mostrar findings detalhados
+          if (findings != null && findings.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            const Divider(color: Colors.white12),
+            const SizedBox(height: 6),
+            const Text('Relatório de Investigação:',
+              style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            ...findings.map((f) {
+              final severity = f['severity'] as String? ?? 'yellow';
+              Color textColor;
+              switch (severity) {
+                case 'red': textColor = Colors.redAccent; break;
+                case 'green': textColor = Colors.greenAccent; break;
+                case 'blue': textColor = Colors.lightBlueAccent; break;
+                default: textColor = Colors.amber;
+              }
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(f['icon'] as String? ?? '•', style: const TextStyle(fontSize: 11)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        f['text'] as String? ?? '',
+                        style: TextStyle(color: textColor, fontSize: 11, height: 1.3),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
           ],
         ],
       ),
@@ -2045,66 +2496,41 @@ class _DisputeDetailScreenState extends State<DisputeDetailScreen> {
       final nostrService = NostrOrderService();
       
       // 1. Publicar resolução no Nostr (kind 1, tag bro-resolucao)
-      final published = await nostrService.publishDisputeResolution(
-        privateKey: privateKey,
-        orderId: orderId,
-        resolution: resolution,
-        notes: message,
-        userPubkey: userPubkey,
-        providerId: providerId,
-      );
+      //    Timeout de 20s para não travar a tela
+      bool published = false;
+      try {
+        published = await nostrService.publishDisputeResolution(
+          privateKey: privateKey,
+          orderId: orderId,
+          resolution: resolution,
+          notes: message,
+          userPubkey: userPubkey,
+          providerId: providerId,
+        ).timeout(const Duration(seconds: 20), onTimeout: () => false);
+      } catch (e) {
+        broLog('⚠️ publishDisputeResolution timeout/erro: $e');
+      }
       
-      // 2. Atualizar status da ordem LOCALMENTE (NÃO publicar no Nostr como mediador)
-      // CORREÇÃO v1.0.129: O mediador NÃO deve publicar kind 30080 bro_order_update
-      // porque isso faz a ordem aparecer na lista do mediador como se fosse dele.
-      // O publishDisputeResolution acima já publica um kind 30080 audit com type=bro_dispute_resolution
-      // que é processado pelo sync das partes envolvidas.
+      // 2. Atualizar status da ordem LOCALMENTE (sem publicar no Nostr como mediador)
       final newStatus = resolution == 'resolved_user' ? 'cancelled' : 'completed';
-      // Nota: Não chamamos orderProvider.updateOrderStatus nem updateOrderStatusLocal
-      // pois ambos publicam kind 30080 com a chave do mediador, poluindo o Nostr.
-      
-      // 3. Enviar mensagem de resolução para ambas as partes via bro-mediacao
-      final resolutionMsg = '⚖️ RESOLUÇÃO DA DISPUTA\n\n'
-        'Ordem: ${orderId.length > 8 ? orderId.substring(0, 8) : orderId}...\n'
-        'Decisão: ${resolution == 'resolved_user' ? 'A favor do USUÁRIO' : 'A favor do PROVEDOR'}\n\n'
-        '$message\n\n'
-        'Status atualizado para: ${newStatus == 'cancelled' ? 'Cancelada' : 'Concluída'}';
-      
-      await nostrService.publishMediatorMessage(
-        privateKey: privateKey,
-        orderId: orderId,
-        message: resolutionMsg,
-        target: 'both',
-        userPubkey: userPubkey,
-        providerId: providerId,
-      );
-      
-      // v239: Também enviar como DM NIP-04 para aparecer na caixa de entrada
-      // (compatível com versões antigas do app)
-      if (userPubkey.isNotEmpty) {
-        await nostrService.sendAdminNip04DM(
-          adminPrivateKey: privateKey,
-          recipientPubkey: userPubkey,
-          message: '⚖️ [Bro Mediação] $resolutionMsg',
-        );
-      }
-      if (providerId.isNotEmpty) {
-        await nostrService.sendAdminNip04DM(
-          adminPrivateKey: privateKey,
-          recipientPubkey: providerId,
-          message: '⚖️ [Bro Mediação] $resolutionMsg',
-        );
+      try {
+        orderProvider.updateOrderStatusLocalOnly(orderId: orderId, status: newStatus);
+        broLog('✅ Status local da ordem atualizado para $newStatus');
+      } catch (e) {
+        broLog('⚠️ Erro ao atualizar status local: $e');
       }
       
-      // v270: Persistir resolução localmente para não depender do relay
+      // 3. Persistir resolução localmente (não depende do relay)
       await StorageService().markDisputeResolved(orderId, resolution);
       
-      setState(() {
-        _isResolved = true;
-        _resolvedDirection = resolution;
-      });
-      
+      // 4. Atualizar UI IMEDIATAMENTE — não esperar notificações
       if (mounted) {
+        setState(() {
+          _isResolved = true;
+          _resolvedDirection = resolution;
+          _isLoading = false;
+        });
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(published
@@ -2115,6 +2541,17 @@ class _DisputeDetailScreenState extends State<DisputeDetailScreen> {
           ),
         );
       }
+      
+      // 5. Enviar notificações em background (fire-and-forget, não trava a UI)
+      final resolutionMsg = '⚖️ RESOLUÇÃO DA DISPUTA\n\n'
+        'Ordem: ${orderId.length > 8 ? orderId.substring(0, 8) : orderId}...\n'
+        'Decisão: ${resolution == 'resolved_user' ? 'A favor do USUÁRIO' : 'A favor do PROVEDOR'}\n\n'
+        '$message\n\n'
+        'Status atualizado para: ${newStatus == 'cancelled' ? 'Cancelada' : 'Concluída'}';
+      
+      // Fire-and-forget: mensagens e DMs com timeout individual
+      _sendResolutionNotifications(nostrService, privateKey, resolutionMsg);
+      
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2122,7 +2559,52 @@ class _DisputeDetailScreenState extends State<DisputeDetailScreen> {
         );
       }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted && _isLoading) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+  
+  /// Envia notificações de resolução em background (não trava a UI)
+  Future<void> _sendResolutionNotifications(
+    NostrOrderService nostrService, String privateKey, String resolutionMsg,
+  ) async {
+    try {
+      await nostrService.publishMediatorMessage(
+        privateKey: privateKey,
+        orderId: orderId,
+        message: resolutionMsg,
+        target: 'both',
+        userPubkey: userPubkey,
+        providerId: providerId,
+      ).timeout(const Duration(seconds: 15), onTimeout: () => false);
+    } catch (e) {
+      broLog('⚠️ Erro ao enviar mensagem de resolução: $e');
+    }
+    
+    // DMs NIP-04 para as partes
+    try {
+      if (userPubkey.isNotEmpty) {
+        await nostrService.sendAdminNip04DM(
+          adminPrivateKey: privateKey,
+          recipientPubkey: userPubkey,
+          message: '⚖️ [Bro Mediação] $resolutionMsg',
+        ).timeout(const Duration(seconds: 15), onTimeout: () => false);
+      }
+    } catch (e) {
+      broLog('⚠️ DM para usuário falhou: $e');
+    }
+    
+    try {
+      if (providerId.isNotEmpty) {
+        await nostrService.sendAdminNip04DM(
+          adminPrivateKey: privateKey,
+          recipientPubkey: providerId,
+          message: '⚖️ [Bro Mediação] $resolutionMsg',
+        ).timeout(const Duration(seconds: 15), onTimeout: () => false);
+      }
+    } catch (e) {
+      broLog('⚠️ DM para provedor falhou: $e');
     }
   }
   

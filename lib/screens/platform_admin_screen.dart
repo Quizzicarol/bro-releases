@@ -171,8 +171,20 @@ class _PlatformAdminScreenState extends State<PlatformAdminScreen> {
           }
         }
         
-        // 2.5 NOVO: Carregar resoluções locais (independente do relay)
+        // 2.5 Carregar resoluções locais (independente do relay)
         final locallyResolvedIds = await StorageService().getResolvedDisputeOrderIds();
+        
+        // 2.6 NOVO: Persistir resoluções encontradas no relay localmente
+        // Garante que, mesmo que o relay perca o evento futuramente, temos o registro.
+        final storage = StorageService();
+        for (final entry in resolutionsByOrderId.entries) {
+          if (!locallyResolvedIds.contains(entry.key)) {
+            final resolution = entry.value['resolution'] as String? ?? 'resolved_unknown';
+            await storage.markDisputeResolved(entry.key, resolution);
+            locallyResolvedIds.add(entry.key);
+            broLog('💾 Resolução do relay persistida localmente: ${entry.key.substring(0, 8)}');
+          }
+        }
         
         // 3. Classificar disputas do fetch em abertas/resolvidas
         // Carregar ordens locais para verificar status atual
@@ -237,6 +249,17 @@ class _PlatformAdminScreenState extends State<PlatformAdminScreen> {
           agentStats = await ApiService().getAgentStats();
         } catch (e) {
           broLog('⚠️ Agent não disponível: $e');
+        }
+        
+        // Fallback: análise heurística local se backend não respondeu
+        if (agentAnalyses.isEmpty && openNostr.isNotEmpty) {
+          for (final dispute in openNostr) {
+            final local = _runLocalDisputeHeuristic(dispute);
+            if (local != null) agentAnalyses.add(local);
+          }
+          if (agentAnalyses.isNotEmpty) {
+            broLog('🤖 ${agentAnalyses.length} análise(s) heurística(s) local(is) gerada(s)');
+          }
         }
 
         setState(() {
@@ -857,6 +880,100 @@ class _PlatformAdminScreenState extends State<PlatformAdminScreen> {
     }
   }
 
+  /// Análise heurística local para disputas (versão dashboard — dados limitados)
+  /// Princípio: provedor que alega ter pago TEM que provar. Na dúvida, escrow volta ao usuário.
+  Map<String, dynamic>? _runLocalDisputeHeuristic(Map<String, dynamic> dispute) {
+    final disputeOpenedBy = dispute['openedBy'] as String? ?? 'user';
+    final disputeReason = dispute['reason'] as String? ?? '';
+    final disputeDescription = dispute['description'] as String? ?? '';
+    final hasEvidence = (dispute['user_evidence_nip44'] as String?)?.isNotEmpty == true &&
+        (dispute['user_evidence_nip44'] as String).length > 100;
+    final orderId = dispute['orderId'] as String? ?? '';
+    final isPix = (dispute['payment_type'] as String? ?? '').toLowerCase().contains('pix') ||
+        (dispute['pix_key'] as String? ?? '').isNotEmpty;
+    
+    double score = 0;
+    List<Map<String, dynamic>> findings = [];
+    
+    // Motivo da disputa
+    final isNoResponse = disputeReason.contains('não respondeu') ||
+        disputeReason.contains('no_response') ||
+        disputeReason.contains('provider_no_response');
+    
+    final isPaymentIssue = disputeReason.contains('pagamento') ||
+        disputeReason.contains('payment') ||
+        disputeReason.contains('não receb') ||
+        disputeReason.contains('not_received') ||
+        disputeReason.contains('falso') ||
+        disputeReason.contains('fake');
+    
+    if (isNoResponse) {
+      score -= 0.30;
+      findings.add({'icon': '🔴', 'text': 'Provedor não respondeu — abandono da ordem', 'severity': 'red'});
+    }
+    
+    if (disputeOpenedBy == 'user' && isPaymentIssue) {
+      score -= 0.10;
+      findings.add({'icon': '🔴', 'text': 'Usuário contesta pagamento do provedor', 'severity': 'red'});
+    }
+    
+    // Análise de quem abriu e evidências
+    if (disputeOpenedBy == 'provider' && hasEvidence) {
+      score -= 0.15;
+      findings.add({'icon': '🟠', 'text': 'Provedor abriu disputa mas usuário tem evidência', 'severity': 'yellow'});
+    } else if (disputeOpenedBy == 'user' && !hasEvidence && disputeDescription.length < 20 && !isNoResponse && !isPaymentIssue) {
+      score += 0.05;
+      findings.add({'icon': '🟡', 'text': 'Usuário abriu disputa sem evidência e sem descrição', 'severity': 'yellow'});
+    }
+    
+    // Tipo de pagamento
+    if (isPix) {
+      findings.add({'icon': '🔵', 'text': 'Pagamento PIX — abra disputa para verificar E2E e comprovante', 'severity': 'blue'});
+    }
+    
+    // Qualidade da descrição
+    if (disputeDescription.length >= 80) {
+      findings.add({'icon': '🟢', 'text': 'Descrição detalhada do reclamante', 'severity': 'green'});
+    }
+    
+    // Decisão
+    String suggestion;
+    double confidence;
+    String reason;
+    
+    final redFlags = findings.where((f) => f['severity'] == 'red').length;
+    final greenFlags = findings.where((f) => f['severity'] == 'green').length;
+    
+    if (score <= -0.15) {
+      suggestion = 'resolved_user';
+      confidence = (0.55 + (-score - 0.15) * 0.6).clamp(0.50, 0.85);
+      reason = 'Indícios contra o provedor ($redFlags red flag(s)). Abra a disputa para análise forense completa.';
+    } else if (score >= 0.15) {
+      suggestion = 'resolved_provider';
+      confidence = (0.45 + (score - 0.15) * 0.5).clamp(0.40, 0.65);
+      reason = 'Tendência a favor do provedor. Abra a disputa para confirmar com E2E e comprovante.';
+    } else {
+      suggestion = 'escalate';
+      confidence = 0.45;
+      reason = 'Dados insuficientes no dashboard — abra a disputa para análise completa com comprovante e E2E.';
+    }
+    
+    final tier = confidence >= 0.90 ? 1 : confidence >= 0.60 ? 2 : 3;
+    
+    return {
+      'orderId': orderId,
+      'suggestion': suggestion,
+      'confidence': confidence,
+      'reason': reason,
+      'findings': findings,
+      'redFlags': redFlags,
+      'greenFlags': greenFlags,
+      'tier': tier,
+      'source': 'local_heuristic',
+      'analyzedAt': DateTime.now().toIso8601String(),
+    };
+  }
+
   String _calculateAverageFee() {
     final totalTx = _totals?['totalTransactions'] ?? 0;
     final totalSats = _totals?['totalSats'] ?? 0;
@@ -1152,33 +1269,29 @@ class _PlatformAdminScreenState extends State<PlatformAdminScreen> {
           ],
           const SizedBox(height: 10),
 
-          // Action buttons
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _agentLoading ? null : () => _approveAnalysis(disputeId),
-                  icon: const Icon(Icons.check, size: 16, color: Colors.white),
-                  label: const Text('Aprovar', style: TextStyle(fontSize: 12, color: Colors.white)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green.shade700,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                  ),
-                ),
+          // Botão: abrir detalhes da disputa para análise forense completa
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                // Encontrar a disputa correspondente para abrir detalhes
+                final matchingDispute = _nostrDisputes.firstWhere(
+                  (d) => d['orderId'] == disputeId,
+                  orElse: () => <String, dynamic>{},
+                );
+                if (matchingDispute.isNotEmpty) {
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => DisputeDetailScreen(dispute: matchingDispute),
+                  )).then((_) => _loadData());
+                }
+              },
+              icon: const Icon(Icons.search, size: 16, color: Colors.white),
+              label: const Text('Abrir Análise Forense Completa', style: TextStyle(fontSize: 12, color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple.shade700,
+                padding: const EdgeInsets.symmetric(vertical: 10),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _agentLoading ? null : () => _rejectAnalysis(disputeId),
-                  icon: const Icon(Icons.close, size: 16, color: Colors.red),
-                  label: const Text('Rejeitar', style: TextStyle(fontSize: 12, color: Colors.red)),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: Colors.red),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ],
       ),
@@ -2160,23 +2273,9 @@ class _PlatformAdminScreenState extends State<PlatformAdminScreen> {
         providerId: providerId,
       );
       
-      // 2. Atualizar status da ordem local
+      // 2. Atualizar status da ordem LOCALMENTE (sem publicar no Nostr como mediador)
       final newOrderStatus = resolution == 'resolved_user' ? 'cancelled' : 'completed';
-      try {
-        await orderProvider.updateOrderStatus(
-          orderId: orderId,
-          status: newOrderStatus,
-        );
-        
-        await nostrOrderService.updateOrderStatus(
-          privateKey: privateKey,
-          orderId: orderId,
-          newStatus: newOrderStatus,
-          providerId: providerId.isNotEmpty ? providerId : null,
-        );
-      } catch (e) {
-        broLog('⚠️ Erro ao atualizar status da ordem: $e');
-      }
+      orderProvider.updateOrderStatusLocalOnly(orderId: orderId, status: newOrderStatus);
       
       // 3. NOVO: Persistir resolução localmente (independente do relay)
       await StorageService().markDisputeResolved(orderId, resolution);

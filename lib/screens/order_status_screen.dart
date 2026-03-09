@@ -2057,7 +2057,7 @@ class _OrderStatusScreenState extends State<OrderStatusScreen> {
                       ),
                     ),
                     TextButton(
-                      onPressed: () => _showReceiptImage(receiptUrl),
+                      onPressed: () => _showReceiptImage(receiptUrl!),
                       child: Text(l.t('order_view')),
                     ),
                   ],
