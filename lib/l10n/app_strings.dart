@@ -1318,6 +1318,7 @@ const Map<String, String> ptBR = {
   'prov_det_receipt_title': 'Comprovante Enviado',
   'prov_det_old_order': 'Ordem Antiga',
   'prov_det_old_order_msg': 'Esta ordem foi criada há {hours} horas. O código PIX pode ter expirado.\nDeseja continuar mesmo assim?',
+  'prov_det_accept_order': 'Aceitar Ordem',
   'prov_det_accept_anyway': 'Aceitar Mesmo Assim',
   'prov_det_try_again': 'Tentar Novamente',
   'prov_det_reply_mediator': 'Responder ao Mediador',
