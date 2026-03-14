@@ -511,11 +511,6 @@ class _HomeScreenState extends State<HomeScreen> {
           tooltip: AppLocalizations.of(context).t('home_my_wallet'),
         ),
         IconButton(
-          icon: const Icon(Icons.flash_on, color: Colors.amber),
-          onPressed: () => Navigator.pushNamed(context, '/brix'),
-          tooltip: 'BRIX',
-        ),
-        IconButton(
           icon: const Icon(Icons.settings_outlined, color: Colors.white),
           onPressed: _showUserSettings,
           tooltip: AppLocalizations.of(context).t('home_settings'),
@@ -530,6 +525,10 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         // Grade de Botões de Ação (3 botões)
         _buildActionButtonsGrid(),
+        const SizedBox(height: 8),
+
+        // Preço do Bitcoin compacto
+        _buildBtcPriceTicker(),
         const SizedBox(height: 16),
 
         // Lista de Ordens
@@ -548,7 +547,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildActionButtonsGrid() {
     return Column(
       children: [
-        // Primeira linha: Pagar Conta + Preço Bitcoin
+        // Primeira linha: Pagar Conta + BRIX
         Row(
           children: [
             // Pagar Conta
@@ -566,9 +565,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(width: 12),
-            // Preço do Bitcoin
+            // BRIX
             Expanded(
-              child: _buildBitcoinPriceButton(),
+              child: _buildGridButton(
+                icon: Icons.flash_on,
+                label: 'BRIX',
+                gradient: const [Color(0xFFF7931A), Color(0xFFFFAB40)],
+                onTap: () => Navigator.pushNamed(context, '/brix'),
+              ),
             ),
           ],
         ),
@@ -697,6 +701,52 @@ class _HomeScreenState extends State<HomeScreen> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Ticker compacto do preço Bitcoin (inline, abaixo dos botões)
+  Widget _buildBtcPriceTicker() {
+    final btcPriceFormatted = _btcPrice > 0 
+        ? _currencyFormat.format(_btcPrice) 
+        : AppLocalizations.of(context).t('loading');
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: const Color(0xFFF7931A).withOpacity(0.3),
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Image.asset(
+            'assets/images/bitcoin-logo.png',
+            height: 16,
+            width: 16,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'Bitcoin',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.6),
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            btcPriceFormatted,
+            style: const TextStyle(
+              color: Color(0xFFF7931A),
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
             ),
           ),
         ],

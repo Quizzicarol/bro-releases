@@ -3,7 +3,7 @@ import 'package:bro_app/services/log_utils.dart';
 import 'package:flutter/material.dart';
 import '../config.dart';
 import '../services/platform_fee_service.dart';
-import 'breez_provider.dart';
+import 'breez_provider_export.dart';
 import 'breez_liquid_provider.dart';
 
 /// Tipos de backend Lightning

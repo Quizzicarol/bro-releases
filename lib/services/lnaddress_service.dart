@@ -162,7 +162,7 @@ class LnAddressService {
   }
 
   /// Domínios BRIX que devem ser resolvidos via servidor local
-  static const _brixDomains = ['brix.app', 'brostr.app'];
+  static const _brixDomains = ['brix.app', 'brostr.app', 'brix.brostr.app'];
 
   /// URL do servidor BRIX (from environment)
   static const String _brixServerUrl = String.fromEnvironment(
@@ -300,7 +300,16 @@ class LnAddressService {
 
       // Construir URL com o valor em millisats
       final amountMsat = amountSats * 1000;
-      var invoiceUrl = '$callback${callback.contains('?') ? '&' : '?'}amount=$amountMsat';
+      
+      // Rewrite BRIX callback URLs to use local server
+      var effectiveCallback = callback;
+      final callbackUri = Uri.parse(callback);
+      if (_brixDomains.any((d) => callbackUri.host == d || callbackUri.host.endsWith('.$d'))) {
+        effectiveCallback = '$_brixServerUrl${callbackUri.path}';
+        broLog('🔗 BRIX callback rewritten to local: $effectiveCallback');
+      }
+      
+      var invoiceUrl = '$effectiveCallback${effectiveCallback.contains('?') ? '&' : '?'}amount=$amountMsat';
       
       // Adicionar comentário se permitido
       if (comment != null && comment.isNotEmpty && commentAllowed > 0) {
@@ -313,12 +322,16 @@ class LnAddressService {
       broLog('💸 Obtendo invoice para $amountSats sats...');
       broLog('🌐 URL: $invoiceUrl');
 
+      // BRIX relay polls for up to 25s, so use 30s timeout for BRIX addresses
+      final isBrix = !isLnurl(lnAddress) && _brixDomains.any((d) => lnAddress.toLowerCase().endsWith('@$d') || lnAddress.toLowerCase().endsWith('@brix.$d'));
+      final timeoutDuration = isBrix ? const Duration(seconds: 30) : const Duration(seconds: 15);
+
       final response = await http.get(
         Uri.parse(invoiceUrl),
         headers: {
           'Accept': 'application/json',
         },
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(timeoutDuration);
 
       if (response.statusCode != 200) {
         broLog('❌ Erro HTTP ${response.statusCode}: ${response.body}');

@@ -951,8 +951,8 @@ class _WalletScreenState extends State<WalletScreen> {
                       final isLnurl = lowerDest.startsWith('lnurl');
                       final isPhone = RegExp(r'^\+?\d[\d\s\-()]{7,}$').hasMatch(destination.trim());
                       final isBrixUser = RegExp(r'^[a-z0-9_]{3,20}$').hasMatch(lowerDest) && !lowerDest.startsWith('lnbc') && !lowerDest.startsWith('lntb');
-                      // Detect BRIX Lightning Addresses (user@brix.app or user@bro.app)
-                      final isBrixAddress = isLnAddress && (lowerDest.endsWith('@brix.app') || lowerDest.endsWith('@brostr.app'));
+                      // Detect BRIX Lightning Addresses
+                      final isBrixAddress = isLnAddress && (lowerDest.endsWith('@brix.app') || lowerDest.endsWith('@brostr.app') || lowerDest.endsWith('@brix.brostr.app'));
                       final needsBrixResolve = isPhone || isBrixUser || isBrixAddress;
                       final needsAmountInput = isLnAddress || isLnurl || needsBrixResolve;
                       
@@ -1025,9 +1025,14 @@ class _WalletScreenState extends State<WalletScreen> {
                           );
                           
                           if (invoiceResult['success'] != true) {
+                            final errMsg = invoiceResult['error'] ?? '';
                             setModalState(() {
                               isSending = false;
-                              errorMessage = invoiceResult['error'] ?? AppLocalizations.of(context).t('wallet_resolve_failed');
+                              if (errMsg == 'BRIX_RECIPIENT_OFFLINE') {
+                                errorMessage = '⚡ O destinatário não está com o app aberto neste momento.\n\nPeça para ele abrir o Bro App e tente novamente. O BRIX precisa que o destinatário esteja online para gerar a invoice.';
+                              } else {
+                                errorMessage = errMsg.isNotEmpty ? errMsg : AppLocalizations.of(context).t('wallet_resolve_failed');
+                              }
                             });
                             return;
                           }
@@ -1059,7 +1064,11 @@ class _WalletScreenState extends State<WalletScreen> {
                           broLog('❌ Erro ao enviar: $e');
                           setModalState(() {
                             isSending = false;
-                            errorMessage = 'Erro: $e';
+                            if (e.toString().contains('TimeoutException') || e.toString().contains('timeout')) {
+                              errorMessage = '⚡ O destinatário não está com o app aberto neste momento.\n\nPeça para ele abrir o Bro App e tente novamente. O BRIX precisa que o destinatário esteja online para gerar a invoice.';
+                            } else {
+                              errorMessage = 'Erro: $e';
+                            }
                           });
                         }
                         return;
@@ -2319,12 +2328,12 @@ class _WalletScreenState extends State<WalletScreen> {
     } else if (description == 'BRIX Payment' || description.toLowerCase().contains('brix payment')) {
       // BRIX recebido
       label = 'pagamento brix';
-      iconColor = Colors.purple;
+      iconColor = Colors.amber;
       icon = Icons.flash_on;
-    } else if (!isReceived && (payment['destination']?.toString()?.endsWith('@brostr.app') == true || payment['destination']?.toString()?.endsWith('@brix.app') == true)) {
-      // BRIX enviado
+    } else if (!isReceived && (description.toLowerCase().contains('@brostr.app') || description.toLowerCase().contains('@brix.app'))) {
+      // BRIX enviado (description from LNURL metadata: "Payment to user@brix.brostr.app")
       label = 'envio brix';
-      iconColor = Colors.purple;
+      iconColor = Colors.amber;
       icon = Icons.flash_on;
     } else if (isBroEarning || isBroOrderPayment) {
       label = AppLocalizations.of(context).t('wallet_bro_earning');

@@ -42,6 +42,7 @@ class _EscrowManagementScreenState extends State<EscrowManagementScreen> {
   }
 
   Future<void> _createDeposit() async {
+    final l = AppLocalizations.of(context)!;
     if (_providerId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -165,6 +166,7 @@ class _EscrowManagementScreenState extends State<EscrowManagementScreen> {
   }
 
   Widget _buildStatusCard(bool hasCollateral) {
+    final l = AppLocalizations.of(context)!;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -218,6 +220,7 @@ class _EscrowManagementScreenState extends State<EscrowManagementScreen> {
   }
 
   Widget _buildCreateDepositCard() {
+    final l = AppLocalizations.of(context)!;
     return Card(
       color: const Color(0x0DFFFFFF),
       child: Padding(
@@ -266,6 +269,7 @@ class _EscrowManagementScreenState extends State<EscrowManagementScreen> {
   }
 
   Widget _buildActiveDepositCard() {
+    final l = AppLocalizations.of(context)!;
     final availableSats = _collateral?['available_sats'] ?? 0;
     final lockedSats = _collateral?['locked_sats'] ?? 0;
 
@@ -278,7 +282,7 @@ class _EscrowManagementScreenState extends State<EscrowManagementScreen> {
           children: [
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
                     l.t('prov_escrow_active_deposit'),
                     style: const TextStyle(
